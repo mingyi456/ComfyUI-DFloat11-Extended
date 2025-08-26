@@ -49,7 +49,8 @@ Currently, only **FLUX.1 models** are supported. Support for additional models i
 
 1. Once installed, the DFloat11 nodes show up under the `DFloat11` folder in the *Node Library*.
 2. Download a DFloat11 model for ComfyUI from [Hugging Face](https://huggingface.co/DFloat11) and place it under `<ComfyUI_installation_path>/models/diffusion_models`.
-3. Use the `DFloat11 Model Loader` node to load the model in *.safetensors format, which acts as a drop-in replacement for the `Load Diffusion Model` node.
+3. Drag and drop a `*.png` or `*.json` file into ComfyUI to load the workflow.
+4. (Optional) Use the `DFloat11 Model Loader` node to load the model in `*.safetensors` format, which acts as a drop-in replacement for the `Load Diffusion Model` node.
 
 ---
 
