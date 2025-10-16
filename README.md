@@ -1,5 +1,7 @@
 # Extended ComfyUI Plugin for DFloat11
 
+Thanks to @tonyzhang617 for implementing the base DF11 compression and inference code
+
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/dfloat11?period=total\&units=INTERNATIONAL_SYSTEM\&left_color=BLACK\&right_color=GREEN\&left_text=downloads)](https://pepy.tech/projects/dfloat11)
 [![arXiv](https://img.shields.io/badge/arXiv-2504.11651-b31b1b.svg)](https://arxiv.org/abs/2504.11651)
 [![Hugging Face](https://img.shields.io/badge/Model-%F0%9F%A4%97-yellow.svg)](https://huggingface.co/DFloat11)
