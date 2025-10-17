@@ -1,6 +1,12 @@
 # Extended ComfyUI Plugin for DFloat11
 
-Thanks to @tonyzhang617 for implementing the base DF11 compression and inference code
+Thanks to @tonyzhang617 for implementing the base DF11 compression and inference code. Unfortunately, it seems that the original developer is rather sporadic in his efforts to maintain the codebase and add features, so I decided to fork the repo and attempt to support it myself. 
+
+Currently, my fork adds support for DF11 models based on Flux.1-Schnell and Chroma with the existing "DFloat11 Model Loader" node (the original codebase only supports Flux.1-dev based models, because ComfyUI "sees" Dev and Schnell models slightly differently), and I plan to support more base architectures in future. Also, I have added a node ("DFloat11 diffusers-native Model Loader") for loading existing Flux DF11 models that are native to the `diffusers` library by converting them on-the-fly, which reduces the need to provide DF11 compression for both ComfyUI and `diffusers` separately with the same model. Sadly, it appears that my current runtime conversion code causes ComfyUI to use up slighly more VRAM as compared to using a ComfyUI-native DF11 model, so I will have to support both nodes for now. In any case, even with the extra VRAM usage, VRAM consumption still stays below 24 GB (although technically even the full Flux BF16 weights can also run with 24GB of VRAM, just that using literally 100% of the available VRAM will affect system responsiveness)
+
+Finally, the "DFloat11 Model Compressor" allows users to generate their own ComfyUI-native DF11 compressions for Flux and Chroma models. Currently the compression process, which uses only the CPU for compression, while the GPU is only used for verification, is single-threaded, but I guess waiting an hour or two for the compression process should be fine.
+
+Check out my HuggingFace profile here: https://huggingface.co/mingyi456. I have uploaded a few DF11 models that are natively compatible with the original DF11 custom node, while the rest are `diffusers`-native and require my own added node to work with ComfyUI. Feel free to create an [issue](https://github.com/mingyi456/ComfyUI-DFloat11-Extended/issues/new/choose) to request other models for compression as well (either for `diffusers` or ComfyUI), although models that use architectures I am unfamiliar with might be more difficult.
 
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/dfloat11?period=total\&units=INTERNATIONAL_SYSTEM\&left_color=BLACK\&right_color=GREEN\&left_text=downloads)](https://pepy.tech/projects/dfloat11)
 [![arXiv](https://img.shields.io/badge/arXiv-2504.11651-b31b1b.svg)](https://arxiv.org/abs/2504.11651)
