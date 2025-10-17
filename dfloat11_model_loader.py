@@ -124,7 +124,7 @@ class DFloat11DiffusersModelLoader:
         return {
             "required": {
                 "dfloat11_model_name": (folder_paths.get_filename_list("diffusion_models"),),
-                "model_type": (["Flux", "Chroma"],)
+                "model_type": (["Flux",],)
             }
         }
 
