@@ -11,7 +11,7 @@ from .convert_fixed_tensors import convert_diffusers_to_comfyui_flux
 
 MODEL_TO_PATTERN_DICT = {
     "Flux": {
-        "double_blocks\.\d+": (
+        r"double_blocks\.\d+": (
             "img_mod.lin",
             "img_attn.qkv",
             "img_attn.proj",
@@ -23,14 +23,14 @@ MODEL_TO_PATTERN_DICT = {
             "txt_mlp.0",
             "txt_mlp.2",
         ),
-        "single_blocks\.\d+": (
+        r"single_blocks\.\d+": (
             "linear1",
             "linear2",
             "modulation.lin",
         ),
     },
     "FluxSchnell": {
-        "double_blocks\.\d+": (
+        r"double_blocks\.\d+": (
             "img_mod.lin",
             "img_attn.qkv",
             "img_attn.proj",
@@ -42,14 +42,18 @@ MODEL_TO_PATTERN_DICT = {
             "txt_mlp.0",
             "txt_mlp.2",
         ),
-        "single_blocks\.\d+": (
+        r"single_blocks\.\d+": (
             "linear1",
             "linear2",
             "modulation.lin",
         ),
     },
     "Chroma": {
-        "double_blocks\.\d+": (
+        r"distilled_guidance_layer\.layers\.\d+": (
+            "in_layer",
+            "out_layer"        
+        ),
+        r"double_blocks\.\d+": (
             "img_attn.qkv",
             "img_attn.proj",
             "img_mlp.0",
@@ -59,7 +63,7 @@ MODEL_TO_PATTERN_DICT = {
             "txt_mlp.0",
             "txt_mlp.2",
         ),
-        "single_blocks\.\d+": (
+        r"single_blocks\.\d+": (
             "linear1",
             "linear2",
         ),
@@ -119,11 +123,11 @@ class DFloat11ModelLoader:
         offload_device = comfy.model_management.unet_offload_device()
 
         model_config = comfy.sd.model_detection.model_config_from_unet(sd, "")
-        print("unet_config =", comfy.model_detection.detect_unet_config(sd, ""), sep = "\n")
+        # print("unet_config =", comfy.model_detection.detect_unet_config(sd, ""), sep = "\n")
         model_config.set_inference_dtype(torch.bfloat16, torch.bfloat16)
         model = model_config.get_model(sd, "")
         model = model.to(offload_device)
-        print(f"pattern_dict type = {type(model_config).__name__}")
+        # print(f"pattern_dict type = {type(model_config).__name__}")
 
         DFloat11Model.from_single_file(
             dfloat11_model_path,
@@ -207,7 +211,7 @@ class DFloat11ModelCompressor:
         return {
             "required": {
                 "bfloat16_model_name": (folder_paths.get_filename_list("diffusion_models"),),
-                "model_type": (["Flux", "Chroma"],)
+                "model_type": (["Flux", "Chroma", "ChromaRadiance"],)
             }
         }
 
@@ -225,7 +229,7 @@ class DFloat11ModelCompressor:
 
         # print(f"\n{model.model.diffusion_model = }\n")
 
-        save_path = f"{os.path.spliext(bfloat16_model_path)[0]}-DF11"
+        save_path = f"{os.path.splitext(bfloat16_model_path)[0]}-DF11"
         
         compress_model(
             model=model.model.diffusion_model,
