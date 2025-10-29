@@ -121,21 +121,12 @@ def get_hook_flux_diffusers(threads_per_block, bytes_per_thread):
             weights = torch.tensor_split(reconstructed, module.split_positions)
             
             module.weight_injection_modules[0].weight = reconstructed[0:66060288].view(21504, 3072) # linear1
-            
             module.weight_injection_modules[1].weight = weights[2].view(module.weight_injection_modules[1].out_features, module.weight_injection_modules[1].in_features) # linear2
-
             module.weight_injection_modules[2].weight = reconstructed[113246208:141557760].view(9216, 3072) # modulation.lin
-            
-
         
         else:
             raise Exception(f"{len(module.weight_injection_modules)} weight_injection_modules \n{module.weight_injection_modules}")
             
-            
-
-            
-
-
 
         # Delete tensors from GPU if offloading is enabled
         if hasattr(module, 'offloaded_tensors'):

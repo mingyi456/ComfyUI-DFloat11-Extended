@@ -166,26 +166,37 @@ class DFloat11DiffusersModelLoader:
         # state_dict = convert_diffusers_to_comfyui_flux(comfy.utils.load_torch_file(dfloat11_model_path))
         state_dict = comfy.utils.load_torch_file(dfloat11_model_path)
         
-
         if not any(k.endswith("encoded_exponent") for k in state_dict.keys()):
             raise ValueError(f"The model '{dfloat11_model_name}' is not a DFloat11 model.")
 
         load_device = comfy.model_management.get_torch_device()
         offload_device = comfy.model_management.unet_offload_device()
-
-        # model_config = comfy.sd.model_detection.model_config_from_unet(state_dict, "")
         
-                
-        unet_config = {'image_model': 'flux', 'in_channels': 16, 'patch_size': 2, 'out_channels': 16, 'vec_in_dim': 768, 'context_in_dim': 4096, 'hidden_size': 3072, 'mlp_ratio': 4.0, 'num_heads': 24, 'depth': 19, 'depth_single_blocks': 38, 'axes_dim': [16, 56, 56], 'theta': 10000, 'qkv_bias': True, 'guidance_embed': True}
+        unet_config = {
+            'image_model': 'flux', 
+            'in_channels': 16, 
+            'patch_size': 2, 
+            'out_channels': 16, 
+            'vec_in_dim': 768, 
+            'context_in_dim': 4096, 
+            'hidden_size': 3072, 
+            'mlp_ratio': 4.0, 
+            'num_heads': 24, 
+            'depth': 19, 
+            'depth_single_blocks': 38, 
+            'axes_dim': [16, 56, 56], 
+            'theta': 10000, 
+            'qkv_bias': True, 
+            'guidance_embed': True
+        }
+        
         unet_config["guidance_embed"] = "time_text_embed.guidance_embedder.linear_1.weight" in state_dict
         
         model_config = comfy.supported_models.Flux(unet_config)
-        
-        
         model_config.set_inference_dtype(torch.bfloat16, torch.bfloat16)
         model = model_config.get_model(state_dict, "")
         model = model.to(offload_device)
-        print(f"pattern_dict type = {type(model_config).__name__}")
+
 
         DFloat11FluxDiffusersModel.from_single_file(
             dfloat11_model_path,
