@@ -123,11 +123,9 @@ class DFloat11ModelLoader:
         offload_device = comfy.model_management.unet_offload_device()
 
         model_config = comfy.sd.model_detection.model_config_from_unet(sd, "")
-        # print("unet_config =", comfy.model_detection.detect_unet_config(sd, ""), sep = "\n")
         model_config.set_inference_dtype(torch.bfloat16, torch.bfloat16)
         model = model_config.get_model(sd, "")
         model = model.to(offload_device)
-        # print(f"pattern_dict type = {type(model_config).__name__}")
 
         DFloat11Model.from_single_file(
             dfloat11_model_path,
@@ -197,7 +195,6 @@ class DFloat11DiffusersModelLoader:
         model = model_config.get_model(state_dict, "")
         model = model.to(offload_device)
 
-
         DFloat11FluxDiffusersModel.from_single_file(
             dfloat11_model_path,
             pattern_dict=MODEL_TO_PATTERN_DICT[model_type],
@@ -238,8 +235,6 @@ class DFloat11ModelCompressor:
 
         model = comfy.sd.load_diffusion_model(bfloat16_model_path, {"dtype" : torch.bfloat16})
 
-        # print(f"\n{model.model.diffusion_model = }\n")
-
         save_path = f"{os.path.splitext(bfloat16_model_path)[0]}-DF11"
         
         compress_model(
@@ -252,7 +247,6 @@ class DFloat11ModelCompressor:
         )
 
         return (save_path,)
-
 
 
 
