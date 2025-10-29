@@ -91,6 +91,31 @@ MODEL_TO_PATTERN_DICT = {
             "param_generator", 
         )
     },
+    "WAN22_T2V": {
+        "text_embedding": (
+            "0",
+            "2"
+        ),
+        "time_embedding": (
+            "0",
+            "2"
+        ),
+        "time_projection": (
+            "1",
+        ),
+        "blocks\.\d+": (
+            "self_attn.q",
+            "self_attn.k",
+            "self_attn.v",
+            "self_attn.o",
+            "cross_attn.q",
+            "cross_attn.k",
+            "cross_attn.v",
+            "cross_attn.o",
+            "ffn.0",
+            "ffn.2",
+        )
+    },
 }
 
 class DFloat11ModelLoader:
@@ -219,7 +244,7 @@ class DFloat11ModelCompressor:
         return {
             "required": {
                 "bfloat16_model_name": (folder_paths.get_filename_list("diffusion_models"),),
-                "model_type": (["Flux", "Chroma", "ChromaRadiance"],)
+                "model_type": (list(MODEL_TO_PATTERN_DICT.keys()),)
             }
         }
 
