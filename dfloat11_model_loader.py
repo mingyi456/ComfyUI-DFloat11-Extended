@@ -92,17 +92,6 @@ MODEL_TO_PATTERN_DICT = {
         )
     },
     "WAN22_T2V": {
-        "text_embedding": (
-            "0",
-            "2"
-        ),
-        "time_embedding": (
-            "0",
-            "2"
-        ),
-        "time_projection": (
-            "1",
-        ),
         "blocks\.\d+": (
             "self_attn.q",
             "self_attn.k",
@@ -162,6 +151,123 @@ class DFloat11ModelLoader:
         return (
             comfy.model_patcher.ModelPatcher(model, load_device=load_device, offload_device=offload_device),
         )
+
+class DFloat11WanModelLoader:
+    """
+    A custom node to load a DFloat11 diffusion model from the `diffusion_models` directory.
+
+    DFloat11 models are >30% smaller than their float16 counterparts, yet produce bit-for-bit identical outputs.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "bfloat16_model_name": (folder_paths.get_filename_list("diffusion_models"),),
+                "dfloat11_model_name": (folder_paths.get_filename_list("diffusion_models"),),
+                "use_df11": (["True", "False"],)
+            }
+        }
+
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "load_dfloat11_model"
+    CATEGORY = "DFloat11"
+    
+
+    def load_dfloat11_model(self, bfloat16_model_name, dfloat11_model_name, use_df11):
+        bfloat16_model_path = folder_paths.get_full_path_or_raise("diffusion_models", bfloat16_model_name)
+        dfloat11_model_path = folder_paths.get_full_path_or_raise("diffusion_models", dfloat11_model_name)
+        
+        df11_state_dict = comfy.utils.load_torch_file(dfloat11_model_path)
+        if not any(k.endswith("encoded_exponent") for k in df11_state_dict.keys()):
+            raise ValueError(f"The model '{dfloat11_model_name}' is not a DFloat11 model.")
+
+        model = comfy.sd.load_diffusion_model(bfloat16_model_path, {"dtype" : torch.bfloat16})
+        # model = comfy.sd.load_diffusion_model(bfloat16_model_path, {})
+
+        offload_device = comfy.model_management.unet_offload_device()
+        
+        
+        if use_df11 == "True":
+            print("Using DF11")
+            DFloat11Model.from_single_file(
+                dfloat11_model_path,
+                pattern_dict=MODEL_TO_PATTERN_DICT["WAN22_T2V"],
+                bfloat16_model=model.model.diffusion_model,
+                device=offload_device,
+            )
+        
+        else:
+            print("NOT using DF11")
+
+        return (model,)
+
+class DFloat11WanModelLoader2:
+    """
+    A custom node to load a DFloat11 diffusion model from the `diffusion_models` directory.
+
+    DFloat11 models are >30% smaller than their float16 counterparts, yet produce bit-for-bit identical outputs.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "dfloat11_model_name": (folder_paths.get_filename_list("diffusion_models"),),
+            }
+        }
+
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "load_dfloat11_model"
+    CATEGORY = "DFloat11"
+    
+
+    def load_dfloat11_model(self, dfloat11_model_name):
+        dfloat11_model_path = folder_paths.get_full_path_or_raise("diffusion_models", dfloat11_model_name)
+        
+        df11_state_dict = comfy.utils.load_torch_file(dfloat11_model_path)
+        if not any(k.endswith("encoded_exponent") for k in df11_state_dict.keys()):
+            raise ValueError(f"The model '{dfloat11_model_name}' is not a DFloat11 model.")
+
+        load_device = comfy.model_management.get_torch_device()
+        offload_device = comfy.model_management.unet_offload_device()
+        
+        wan_22_ti2v_config = {
+            'image_model': 'wan2.1', 
+            'dim': 3072, 
+            'out_dim': 48, 
+            'num_heads': 24, 
+            'ffn_dim': 14336, 
+            'num_layers': 30, 
+            'patch_size': (1, 2, 2), 
+            'freq_dim': 256, 
+            'window_size': (-1, -1), 
+            'qk_norm': True, 
+            'cross_attn_norm': True, 
+            'eps': 1e-06, 
+            'in_dim': 48, 
+            'model_type': 't2v'
+        }
+        
+        model_config = comfy.supported_models.WAN22_T2V(wan_22_ti2v_config)
+        model_config.set_inference_dtype(torch.bfloat16, torch.bfloat16)
+        model = model_config.get_model(df11_state_dict, "")
+        model = model.to(offload_device)
+
+        print("Using DF11 without BF16 init")
+        DFloat11Model.from_single_file(
+            dfloat11_model_path,
+            pattern_dict=MODEL_TO_PATTERN_DICT["WAN22_T2V"],
+            bfloat16_model=model.diffusion_model,
+            device=offload_device,
+        )
+        
+
+        return (
+            comfy.model_patcher.ModelPatcher(model, load_device=load_device, offload_device=offload_device),
+        )
+
+
 
 class DFloat11DiffusersModelLoader:
     """
@@ -277,12 +383,16 @@ class DFloat11ModelCompressor:
 
 NODE_CLASS_MAPPINGS = {
     "DFloat11ModelLoader": DFloat11ModelLoader,
+    "DFloat11WanModelLoader": DFloat11WanModelLoader,
+    "DFloat11WanModelLoader2": DFloat11WanModelLoader2,
     "DFloat11DiffusersModelLoader" : DFloat11DiffusersModelLoader,
     "DFloat11ModelCompressor" : DFloat11ModelCompressor,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "DFloat11ModelLoader": "DFloat11 Model Loader",
+    "DFloat11WanModelLoader": "DFloat11 Wan Model Loader",
+    "DFloat11WanModelLoader2": "DFloat11 Wan Model Loader 2",
     "DFloat11DiffusersModelLoader" : "DFloat11 diffusers-native Model Loader",
     "DFloat11ModelCompressor" : "DFloat11 Model Compressor",
 }
