@@ -24,7 +24,7 @@ double_map = {
 	# "txt_attn.qkv.bias" : ("attn.add_q_proj.bias", "attn.add_k_proj.bias", "attn.add_v_proj.bias"),
 	"txt_mlp.0.bias" : "ff_context.net.0.proj.bias",
 	"txt_mlp.2.bias" : "ff_context.net.2.bias",
-	"txt_mod.lin.bias" : "norm1_context.linear.bias"	
+	"txt_mod.lin.bias" : "norm1_context.linear.bias"
 }
 
 double_map_multi = {
