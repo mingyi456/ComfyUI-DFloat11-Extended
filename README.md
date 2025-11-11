@@ -1,6 +1,6 @@
 # Extended ComfyUI Plugin for DFloat11
 
-### Update: I just added support for [Chroma1-Radiance](https://huggingface.co/lodestones/Chroma1-Radiance). Compressed weights are available on my HF profile.
+### Update: Support added for SDXL-based models (unet component only). Compressed weights are available on [my HF profile](https://huggingface.co/mingyi456).
 
 Thanks to @tonyzhang617 for implementing the base DF11 compression and inference code. Unfortunately, it seems that the original developer is rather sporadic in his efforts to maintain the codebase and add features, so I decided to fork the repo and attempt to support it myself. 
 
