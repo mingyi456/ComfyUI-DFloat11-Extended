@@ -48,7 +48,7 @@ class DFloat11ModelLoader:
             # Assume it is CosmosPredict2, because no other model architectures are supported yet
             state_dict["blocks.0.mlp.layer1.weight"] = None
             model_config = comfy.sd.model_detection.model_config_from_unet(state_dict, "")
-            assert model_config is not None
+            assert model_config is not None, "Unable to detect model type"
         
         model_config.set_inference_dtype(torch.bfloat16, torch.bfloat16)
         model = model_config.get_model(state_dict, "")

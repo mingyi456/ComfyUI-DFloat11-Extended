@@ -85,7 +85,6 @@ MODEL_TO_PATTERN_DICT = {
             "linear_1",
             "linear_2",
         ),
-        
         r"blocks\.\d+": (
             "self_attn.q_proj",
             "self_attn.k_proj",
@@ -104,7 +103,6 @@ MODEL_TO_PATTERN_DICT = {
             "adaln_modulation_mlp.1",
             "adaln_modulation_mlp.2",
         )
-
     },
     "SDXL": {
         r"time_embed" : (
