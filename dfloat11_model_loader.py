@@ -65,6 +65,70 @@ class DFloat11ModelLoader:
             comfy.model_patcher.ModelPatcher(model, load_device=load_device, offload_device=offload_device),
         )
 
+class DFloat11ModelLoaderAdvanced:
+    """
+    A custom node to load a DFloat11 diffusion model from the `diffusion_models` directory.
+
+    DFloat11 models are >30% smaller than their float16 counterparts, yet produce bit-for-bit identical outputs.
+    """
+
+    '''
+    max_memory: Maximum memory allocation per device
+    cpu_offload: Enables CPU offloading; only keeps a single block of weights in GPU at once
+    cpu_offload_blocks: Number of transformer blocks to offload to CPU; if None, offload all blocks
+    pin_memory: Enables memory-pinning/page-locking when using CPU offloading
+    '''
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "dfloat11_model_name": (folder_paths.get_filename_list("diffusion_models"),),
+                "cpu_offload" : ("BOOLEAN", {"default": False, "tooltip": "Whether to offload to CPU RAM"}),
+                "cpu_offload_blocks": ("INT", {"default": 0, "min": 0, "max": 999, "step": 1, "tooltip": "If set to 0, all blocks will be offloaded to CPU RAM"}),
+                "pin_memory" : ("BOOLEAN", {"default": True, "tooltip": "Whether to lock/pin the weights to CPU RAM. Enabling this option increases RAM usage (which might cause OOM), but should increase speed"}),
+            }
+        }
+
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "load_dfloat11_model"
+    CATEGORY = "DFloat11"
+
+    def load_dfloat11_model(self, dfloat11_model_name, cpu_offload, cpu_offload_blocks, pin_memory):
+        dfloat11_model_path = folder_paths.get_full_path_or_raise("diffusion_models", dfloat11_model_name)
+        state_dict = comfy.utils.load_torch_file(dfloat11_model_path)
+
+        if not any(k.endswith("encoded_exponent") for k in state_dict.keys()):
+            raise ValueError(f"The model '{dfloat11_model_name}' is not a DFloat11 model.")
+
+        load_device = comfy.model_management.get_torch_device()
+        offload_device = comfy.model_management.unet_offload_device()
+
+        model_config = comfy.sd.model_detection.model_config_from_unet(state_dict, "")
+        
+        if model_config is None:
+            # Assume it is CosmosPredict2, because no other model architectures are supported yet
+            state_dict["blocks.0.mlp.layer1.weight"] = None
+            model_config = comfy.sd.model_detection.model_config_from_unet(state_dict, "")
+            assert model_config is not None, "Unable to detect model type"
+        
+        model_config.set_inference_dtype(torch.bfloat16, torch.bfloat16)
+        model = model_config.get_model(state_dict, "")
+        model = model.to(offload_device)
+
+        DFloat11Model.from_single_file(
+            dfloat11_model_path,
+            pattern_dict=MODEL_TO_PATTERN_DICT[type(model_config).__name__],
+            bfloat16_model=model.diffusion_model,
+            device=offload_device,
+            cpu_offload=cpu_offload,
+            cpu_offload_blocks=cpu_offload_blocks if cpu_offload_blocks > 0 else None,
+            pin_memory=pin_memory,
+        )
+
+        return (
+            comfy.model_patcher.ModelPatcher(model, load_device=load_device, offload_device=offload_device),
+        )
+
 class CheckpointLoaderWithDFloat11(CheckpointLoaderSimple):
     @classmethod
     def INPUT_TYPES(s):
