@@ -34,17 +34,24 @@ class DFloat11ModelLoader:
 
     def load_dfloat11_model(self, dfloat11_model_name):
         dfloat11_model_path = folder_paths.get_full_path_or_raise("diffusion_models", dfloat11_model_name)
-        sd = comfy.utils.load_torch_file(dfloat11_model_path)
+        state_dict = comfy.utils.load_torch_file(dfloat11_model_path)
 
-        if not any(k.endswith("encoded_exponent") for k in sd.keys()):
+        if not any(k.endswith("encoded_exponent") for k in state_dict.keys()):
             raise ValueError(f"The model '{dfloat11_model_name}' is not a DFloat11 model.")
 
         load_device = comfy.model_management.get_torch_device()
         offload_device = comfy.model_management.unet_offload_device()
 
-        model_config = comfy.sd.model_detection.model_config_from_unet(sd, "")
+        model_config = comfy.sd.model_detection.model_config_from_unet(state_dict, "")
+        
+        if model_config is None:
+            # Assume it is CosmosPredict2, because no other model architectures are supported yet
+            state_dict["blocks.0.mlp.layer1.weight"] = None
+            model_config = comfy.sd.model_detection.model_config_from_unet(state_dict, "")
+            assert model_config is not None
+        
         model_config.set_inference_dtype(torch.bfloat16, torch.bfloat16)
-        model = model_config.get_model(sd, "")
+        model = model_config.get_model(state_dict, "")
         model = model.to(offload_device)
 
         DFloat11Model.from_single_file(
