@@ -1,7 +1,7 @@
 # Extended ComfyUI Plugin for DFloat11
 
 <b>Currently supported model architectures:
-- Flux.1-dev and Schnell
+- Flux.1-dev and schnell
 - Chroma
 - Chroma-Radiance
 - SDXL (UNET component only, requires the `--bf16-unet` command-line flag)
