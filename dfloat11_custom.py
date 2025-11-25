@@ -9,6 +9,7 @@ import cupy as cp
 import pkg_resources
 import re
 import math
+import uuid
 
 from sys import stderr
 
@@ -30,6 +31,8 @@ from dfloat11.dfloat11 import version, threads_per_block, bytes_per_thread
 from dfloat11.dfloat11_utils import get_codec, get_32bit_codec, get_luts, encode_weights
 
 from .convert_fixed_tensors import convert_diffusers_to_comfyui_flux
+
+from .state_dict_keys import flux_keys_set, chroma_keys_set
 
 ptx_path = pkg_resources.resource_filename("dfloat11", "decode.ptx")
 _decode = cp.RawModule(path=ptx_path).get_function('decode')
@@ -97,21 +100,16 @@ def get_hook_flux_diffusers(threads_per_block, bytes_per_thread):
             weights = torch.tensor_split(reconstructed, module.split_positions)
             
             module.weight_injection_modules[0].weight = weights[0].view(module.weight_injection_modules[0].out_features, module.weight_injection_modules[0].in_features) # img_mod.lin
-
             module.weight_injection_modules[1].weight = reconstructed[113246208 : 141557760].view(9216, 3072) # img_attn.qkv
-            
             module.weight_injection_modules[2].weight = weights[8].view(module.weight_injection_modules[2].out_features, module.weight_injection_modules[2].in_features) # img_attn.proj
             module.weight_injection_modules[3].weight = weights[10].view(module.weight_injection_modules[3].out_features, module.weight_injection_modules[3].in_features) # img_mlp.0
             module.weight_injection_modules[4].weight = weights[11].view(module.weight_injection_modules[4].out_features, module.weight_injection_modules[4].in_features) # img_mlp.2
             module.weight_injection_modules[5].weight = weights[1].view(module.weight_injection_modules[5].out_features, module.weight_injection_modules[5].in_features) # txt_mod.lin
-            
             module.weight_injection_modules[6].weight = reconstructed[141557760 : 169869312].view(9216, 3072) # txt_attn.qkv
-            
             module.weight_injection_modules[7].weight = weights[9].view(module.weight_injection_modules[7].out_features, module.weight_injection_modules[7].in_features) # txt_attn.proj
             module.weight_injection_modules[8].weight = weights[12].view(module.weight_injection_modules[8].out_features, module.weight_injection_modules[8].in_features) # txt_mlp.0
             module.weight_injection_modules[9].weight = weights[13].view(module.weight_injection_modules[9].out_features, module.weight_injection_modules[9].in_features) # txt_mlp.2
             
-
 
         elif len(module.weight_injection_modules) == 3:
             # Should be single_block
@@ -119,7 +117,6 @@ def get_hook_flux_diffusers(threads_per_block, bytes_per_thread):
             reconstructed[:] = torch.cat((reconstructed[113246208:141557760], reconstructed[28311552:66060288], reconstructed[66060288:113246208], reconstructed[0:28311552]))
             
             weights = torch.tensor_split(reconstructed, module.split_positions)
-            
             module.weight_injection_modules[0].weight = reconstructed[0:66060288].view(21504, 3072) # linear1
             module.weight_injection_modules[1].weight = weights[2].view(module.weight_injection_modules[1].out_features, module.weight_injection_modules[1].in_features) # linear2
             module.weight_injection_modules[2].weight = reconstructed[113246208:141557760].view(9216, 3072) # modulation.lin
@@ -137,7 +134,6 @@ def get_hook_flux_diffusers(threads_per_block, bytes_per_thread):
                     del tmp
 
     return decode_hook
-
 
 
 def load_and_replace_tensors_flux_diffusers(
@@ -278,7 +274,6 @@ class DFloat11FluxDiffusersModel(DFloat11Model):
     def __init__(self):
         super().__init__()
     
-    
     @classmethod
     def from_pretrained(
         cls,
@@ -389,3 +384,192 @@ class DFloat11FluxDiffusersModel(DFloat11Model):
                 print("Warning: Some model layers are on CPU. For inference, ensure the model is fully loaded onto CUDA-compatible GPUs.", file=stderr)
 
         return model
+
+
+from comfy.model_patcher import LowVramPatch
+
+from comfy.model_patcher import get_key_weight, wipe_lowvram_weight, move_weight_functions
+
+from comfy.patcher_extension import CallbacksMP, PatcherInjection, WrappersMP
+
+import logging
+
+def df11_module_size(module):
+    module_mem = 0
+    sd = module.state_dict()
+    for k in sd:
+        t = sd[k]
+        module_mem += t.nelement() * t.element_size()
+    if hasattr(module, "encoded_exponent"):
+        module_mem += module.encoded_exponent.nelement()
+        module_mem += module.sign_mantissa.nelement()
+        
+    return module_mem
+
+def get_hook_lora(patch_list, key):
+    # print(f"lora_hook(), {key = }\n")
+    def lora_hook(module, _):
+        module.weight = comfy.lora.calculate_weight(patch_list, module.weight, key).to(torch.bfloat16)
+    return lora_hook
+
+
+class CustomChromaModelPatcher(comfy.model_patcher.ModelPatcher):
+    def __init__(self, model, load_device, offload_device, size=0, weight_inplace_update=False):
+        super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
+        self.model.state_dict = lambda : {key : None for key in chroma_keys_set}
+
+    def _load_list(self):
+        loading = []
+        for n, module in self.model.named_modules():
+            params = []
+            skip = False
+            for name, param in module.named_parameters(recurse=False):
+                params.append(name)
+            for name, param in module.named_parameters(recurse=True):
+                if name not in params:
+                    skip = True # skip random weights in non leaf modules
+                    break
+            if not skip and (hasattr(module, "comfy_cast_weights") or len(params) > 0):
+                loading.append((comfy.model_management.module_size(module), n, module, params))
+                
+        return loading
+
+    def load(self, device_to=None, lowvram_model_memory=0, force_patch_weights=False, full_load=False):
+        with self.use_ejected():
+            self.unpatch_hooks()
+            mem_counter = 0
+            patch_counter = 0
+            lowvram_counter = 0
+            loading = self._load_list()
+
+            load_completely = []
+            loading.sort(reverse=True)
+            # print(f"CustomChromaModelPatcher.load(), {self.patches = }\n")
+            for x in loading:
+                n = x[1]
+                m = x[2]
+                params = x[3]
+                module_mem = x[0]
+
+                lowvram_weight = False
+
+                weight_key = "{}.weight".format(n)
+                bias_key = "{}.bias".format(n)
+
+                if not full_load and hasattr(m, "comfy_cast_weights"):
+                    if mem_counter + module_mem >= lowvram_model_memory:
+                        lowvram_weight = True
+                        lowvram_counter += 1
+                        if hasattr(m, "prev_comfy_cast_weights"): #Already lowvramed
+                            continue
+
+                cast_weight = self.force_cast_weights
+                if lowvram_weight:
+                    if hasattr(m, "comfy_cast_weights"):
+                        m.weight_function = []
+                        m.bias_function = []
+
+                    if weight_key in self.patches:
+                        if force_patch_weights:
+                            self.patch_weight_to_device(weight_key)
+                        else:
+                            _, set_func, convert_func = get_key_weight(self.model, weight_key)
+                            m.weight_function = [LowVramPatch(weight_key, self.patches, convert_func, set_func)]
+                            patch_counter += 1
+                    if bias_key in self.patches:
+                        if force_patch_weights:
+                            self.patch_weight_to_device(bias_key)
+                            m.register_forward_pre_hook(get_hook_lora(self.patches[weight_key], weight_key))
+                        else:
+                            _, set_func, convert_func = get_key_weight(self.model, bias_key)
+                            m.bias_function = [LowVramPatch(bias_key, self.patches, convert_func, set_func)]
+                            patch_counter += 1
+
+                    cast_weight = True
+                else:
+                    if hasattr(m, "comfy_cast_weights"):
+                        wipe_lowvram_weight(m)
+
+                    if full_load or mem_counter + module_mem < lowvram_model_memory:
+                        mem_counter += module_mem
+                        load_completely.append((module_mem, n, m, params))
+
+                if cast_weight and hasattr(m, "comfy_cast_weights"):
+                    m.prev_comfy_cast_weights = m.comfy_cast_weights
+                    m.comfy_cast_weights = True
+
+                if weight_key in self.weight_wrapper_patches:
+                    m.weight_function.extend(self.weight_wrapper_patches[weight_key])
+
+                if bias_key in self.weight_wrapper_patches:
+                    m.bias_function.extend(self.weight_wrapper_patches[bias_key])
+
+                mem_counter += move_weight_functions(m, device_to)
+
+            load_completely.sort(reverse=True)
+            for x in load_completely:
+                n = x[1]
+                m = x[2]
+                params = x[3] # ['weight', 'bias']
+                if hasattr(m, "comfy_patched_weights"):
+                    if m.comfy_patched_weights == True:
+                        continue
+
+                for param in params:
+                    self.patch_weight_to_device("{}.{}".format(n, param), device_to=device_to)
+                    weight_key = f"{n}.weight"
+                    if param == "bias" and weight_key in self.patches:
+                        m.register_forward_pre_hook(get_hook_lora(self.patches[weight_key], weight_key))
+
+                logging.debug("lowvram: loaded module regularly {} {}".format(n, m))
+                m.comfy_patched_weights = True
+
+            for x in load_completely:
+                x[2].to(device_to)
+
+            if lowvram_counter > 0:
+                logging.info("loaded partially {} {} {}".format(lowvram_model_memory / (1024 * 1024), mem_counter / (1024 * 1024), patch_counter))
+                self.model.model_lowvram = True
+            else:
+                logging.info("loaded completely {} {} {}".format(lowvram_model_memory / (1024 * 1024), mem_counter / (1024 * 1024), full_load))
+                self.model.model_lowvram = False
+                if full_load:
+                    self.model.to(device_to)
+                    mem_counter = self.model_size()
+
+            self.model.lowvram_patch_counter += patch_counter
+            self.model.device = device_to
+            self.model.model_loaded_weight_memory = mem_counter
+            self.model.current_weight_patches_uuid = self.patches_uuid
+
+            for callback in self.get_all_callbacks(CallbacksMP.ON_LOAD):
+                callback(self, device_to, lowvram_model_memory, force_patch_weights, full_load)
+
+            self.apply_hooks(self.forced_hooks, force_apply=True)
+
+
+    def add_patches(self, patches, strength_patch=1.0, strength_model=1.0):
+        with self.use_ejected():
+            p = set()
+            model_sd = chroma_keys_set
+            for k in patches:
+                offset = None
+                function = None
+                if isinstance(k, str):
+                    key = k
+                else:
+                    offset = k[1]
+                    key = k[0]
+                    if len(k) > 2:
+                        function = k[2]
+                
+                if key in model_sd:
+                    p.add(k)
+                    current_patches = self.patches.get(key, [])
+                    current_patches.append((strength_patch, patches[k], strength_model, offset, function))
+                    self.patches[key] = current_patches
+
+            self.patches_uuid = uuid.uuid4()
+            return list(p)
+            
+

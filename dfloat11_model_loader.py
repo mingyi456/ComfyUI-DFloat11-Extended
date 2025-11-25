@@ -4,13 +4,9 @@ import torch
 import os
 
 from nodes import CheckpointLoaderSimple
-
 from dfloat11 import DFloat11Model, compress_model
-
-from .dfloat11_custom import DFloat11FluxDiffusersModel
-
+from .dfloat11_custom import DFloat11FluxDiffusersModel, CustomChromaModelPatcher
 from .convert_fixed_tensors import convert_diffusers_to_comfyui_flux
-
 from .pattern_dict import MODEL_TO_PATTERN_DICT
 
 class DFloat11ModelLoader:
@@ -60,7 +56,12 @@ class DFloat11ModelLoader:
             bfloat16_model=model.diffusion_model,
             device=offload_device,
         )
+        
 
+        if type(model_config).__name__ == "Chroma":
+            return (
+                CustomChromaModelPatcher(model, load_device=load_device, offload_device=offload_device),
+            )
         return (
             comfy.model_patcher.ModelPatcher(model, load_device=load_device, offload_device=offload_device),
         )
