@@ -46,19 +46,21 @@ class DFloat11ModelLoader:
             model_config = comfy.sd.model_detection.model_config_from_unet(state_dict, "")
             assert model_config is not None, "Unable to detect model type"
         
+        df11_type = type(model_config).__name__
+        
         model_config.set_inference_dtype(torch.bfloat16, torch.bfloat16)
         model = model_config.get_model(state_dict, "")
         model = model.to(offload_device)
 
         DFloat11Model.from_single_file(
             dfloat11_model_path,
-            pattern_dict=MODEL_TO_PATTERN_DICT[type(model_config).__name__],
+            pattern_dict=MODEL_TO_PATTERN_DICT[df11_type],
             bfloat16_model=model.diffusion_model,
             device=offload_device,
         )
         
 
-        if type(model_config).__name__ == "Chroma":
+        if df11_type == "Chroma":
             return (
                 CustomChromaModelPatcher(model, load_device=load_device, offload_device=offload_device),
             )
@@ -111,6 +113,8 @@ class DFloat11ModelLoaderAdvanced:
             state_dict["blocks.0.mlp.layer1.weight"] = None
             model_config = comfy.sd.model_detection.model_config_from_unet(state_dict, "")
             assert model_config is not None, "Unable to detect model type"
+
+        df11_type = type(model_config).__name__
         
         model_config.set_inference_dtype(torch.bfloat16, torch.bfloat16)
         model = model_config.get_model(state_dict, "")
@@ -118,7 +122,7 @@ class DFloat11ModelLoaderAdvanced:
 
         DFloat11Model.from_single_file(
             dfloat11_model_path,
-            pattern_dict=MODEL_TO_PATTERN_DICT[type(model_config).__name__],
+            pattern_dict=MODEL_TO_PATTERN_DICT[df11_type],
             bfloat16_model=model.diffusion_model,
             device=offload_device,
             cpu_offload=cpu_offload,
@@ -126,6 +130,10 @@ class DFloat11ModelLoaderAdvanced:
             pin_memory=pin_memory,
         )
 
+        if df11_type == "Chroma":
+            return (
+                CustomChromaModelPatcher(model, load_device=load_device, offload_device=offload_device),
+            )
         return (
             comfy.model_patcher.ModelPatcher(model, load_device=load_device, offload_device=offload_device),
         )

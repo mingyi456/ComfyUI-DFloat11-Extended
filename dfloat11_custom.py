@@ -390,7 +390,7 @@ from comfy.model_patcher import LowVramPatch
 
 from comfy.model_patcher import get_key_weight, wipe_lowvram_weight, move_weight_functions
 
-from comfy.patcher_extension import CallbacksMP, PatcherInjection, WrappersMP
+from comfy.patcher_extension import CallbacksMP
 
 import logging
 
@@ -407,9 +407,9 @@ def df11_module_size(module):
     return module_mem
 
 def get_hook_lora(patch_list, key):
-    # print(f"lora_hook(), {key = }\n")
     def lora_hook(module, _):
-        module.weight = comfy.lora.calculate_weight(patch_list, module.weight, key).to(torch.bfloat16)
+        new_weight = comfy.lora.calculate_weight(patch_list, module.weight, key)
+        module.weight = new_weight
     return lora_hook
 
 
