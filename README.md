@@ -5,7 +5,8 @@
 - Chroma
 - Chroma-Radiance
 - SDXL (UNET component only, requires the `--bf16-unet` command-line flag)
-- Cosmos Predict 2 Text2Image</b>
+- Cosmos Predict 2 Text2Image
+- Lumina Image 2.0</b>
 
 Thanks to @tonyzhang617 for implementing the base DF11 compression and inference code. Unfortunately, it seems that the original developer is rather sporadic in his efforts to maintain the codebase and add features, so I decided to fork the repo and attempt to support it myself. 
 
