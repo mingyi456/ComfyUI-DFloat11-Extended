@@ -129,6 +129,31 @@ MODEL_TO_PATTERN_DICT = {
             "adaLN_modulation.1"
         )
     },
+    "ZImage": {
+        r"noise_refiner\.\d+": (
+            "attention.qkv",
+            "attention.out",
+            "feed_forward.w1",
+            "feed_forward.w2",
+            "feed_forward.w3",
+            "adaLN_modulation.0"
+        ),
+        r"context_refiner\.\d+": (
+            "attention.qkv",
+            "attention.out",
+            "feed_forward.w1",
+            "feed_forward.w2",
+            "feed_forward.w3",
+        ),
+        r"layers\.\d+": (
+            "attention.qkv",
+            "attention.out",
+            "feed_forward.w1",
+            "feed_forward.w2",
+            "feed_forward.w3",
+            "adaLN_modulation.0"
+        )
+    },
     "SDXL": {
         r"time_embed" : (
             "0",
