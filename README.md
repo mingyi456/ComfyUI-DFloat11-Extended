@@ -10,7 +10,7 @@
 - Z-Image</b>
 
 <b>Currently supported features:
-- Compatibility node for loading `diffusers`-native Flux DF11 models
+- Compatibility node for loading `diffusers`-native Flux DF11 models (using the "DFloat11 diffusers-native Model Loader" node)
 - Cpu offloading options (available under the "DFloat11 Model Loader (Advanced)" node)
 - Experimental LoRA support for Chroma</b>
 
