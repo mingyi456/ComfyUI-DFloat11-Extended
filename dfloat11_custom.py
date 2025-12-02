@@ -32,8 +32,6 @@ from dfloat11.dfloat11_utils import get_codec, get_32bit_codec, get_luts, encode
 
 from .convert_fixed_tensors import convert_diffusers_to_comfyui_flux
 
-from .state_dict_keys import flux_keys_set, chroma_keys_set
-
 ptx_path = pkg_resources.resource_filename("dfloat11", "decode.ptx")
 _decode = cp.RawModule(path=ptx_path).get_function('decode')
 
@@ -385,14 +383,15 @@ class DFloat11FluxDiffusersModel(DFloat11Model):
 
         return model
 
+import logging
+import inspect
 
 from comfy.model_patcher import LowVramPatch
-
 from comfy.model_patcher import get_key_weight, wipe_lowvram_weight, move_weight_functions
-
 from comfy.patcher_extension import CallbacksMP
 
-import logging
+from .state_dict_keys import flux_keys_set, chroma_keys_set
+from .state_dict_shapes import chroma_keys_dict
 
 def df11_module_size(module):
     module_mem = 0
@@ -406,17 +405,33 @@ def df11_module_size(module):
         
     return module_mem
 
+def patch_state_dict(state_dict_func):
+    lora_loading_functions = {"model_lora_keys_unet"}
+    fake_state_dict = {key : None for key in chroma_keys_set}
+    def new_state_dict_func():
+        call_stack = inspect.stack()
+        caller_function = call_stack[1].function
+        del call_stack
+        if caller_function in lora_loading_functions:
+            return fake_state_dict
+
+        return state_dict_func()
+    return new_state_dict_func
+
+
 def get_hook_lora(patch_list, key):
     def lora_hook(module, _):
         new_weight = comfy.lora.calculate_weight(patch_list, module.weight, key)
-        module.weight = new_weight
+        module.weight = comfy.float.stochastic_rounding(new_weight, weight.dtype, seed=string_to_seed(key))
     return lora_hook
 
 
 class CustomChromaModelPatcher(comfy.model_patcher.ModelPatcher):
     def __init__(self, model, load_device, offload_device, size=0, weight_inplace_update=False):
         super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
-        self.model.state_dict = lambda : {key : None for key in chroma_keys_set}
+        # self.model.state_dict = lambda : {key : None for key in chroma_keys_set}
+        # self.model.state_dict = lambda : {key : torch.empty(size, device = "cpu") for key, size in chroma_keys_dict.items()}
+        self.model.state_dict = patch_state_dict(self.model.state_dict)
 
     def _load_list(self):
         loading = []

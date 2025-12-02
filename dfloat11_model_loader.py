@@ -27,9 +27,10 @@ class DFloat11ModelLoaderAdvanced:
         return {
             "required": {
                 "dfloat11_model_name": (folder_paths.get_filename_list("diffusion_models"),),
-                "cpu_offload" : ("BOOLEAN", {"default": False, "tooltip": "Whether to offload to CPU RAM"}),
+                "cpu_offload": ("BOOLEAN", {"default": False, "tooltip": "Whether to offload to CPU RAM"}),
                 "cpu_offload_blocks": ("INT", {"default": 0, "min": 0, "max": 999, "step": 1, "tooltip": "If set to 0, all blocks will be offloaded to CPU RAM"}),
-                "pin_memory" : ("BOOLEAN", {"default": True, "tooltip": "Whether to lock/pin the weights to CPU RAM. Enabling this option increases RAM usage (which might cause OOM), but should increase speed"}),
+                "pin_memory": ("BOOLEAN", {"default": True, "tooltip": "Whether to lock/pin the weights to CPU RAM. Enabling this option increases RAM usage (which might cause OOM), but should increase speed"}),
+                "custom_modelpatcher": ("BOOLEAN", {"default": True, "tooltip": "Whether to use the experimental custom ModelPatcher. Currently only enabled for Chroma"}),
             }
         }
 
@@ -37,7 +38,7 @@ class DFloat11ModelLoaderAdvanced:
     FUNCTION = "load_dfloat11_model_advanced"
     CATEGORY = "DFloat11"
 
-    def load_dfloat11_model_advanced(self, dfloat11_model_name, cpu_offload, cpu_offload_blocks, pin_memory):
+    def load_dfloat11_model_advanced(self, dfloat11_model_name, cpu_offload, cpu_offload_blocks, pin_memory, custom_modelpatcher):
         if not cpu_offload:
             cpu_offload_blocks = 0
             pin_memory = True
@@ -76,7 +77,7 @@ class DFloat11ModelLoaderAdvanced:
             pin_memory=pin_memory,
         )
 
-        if df11_type == "Chroma":
+        if df11_type == "Chroma" and custom_modelpatcher:
             return (
                 CustomChromaModelPatcher(model, load_device=load_device, offload_device=offload_device),
             )
