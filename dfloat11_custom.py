@@ -387,7 +387,7 @@ import logging
 import inspect
 
 from comfy.model_patcher import LowVramPatch
-from comfy.model_patcher import get_key_weight, wipe_lowvram_weight, move_weight_functions
+from comfy.model_patcher import get_key_weight, wipe_lowvram_weight, move_weight_functions, string_to_seed
 from comfy.patcher_extension import CallbacksMP
 
 from .state_dict_keys import flux_keys_set, chroma_keys_set
@@ -422,7 +422,7 @@ def patch_state_dict(state_dict_func):
 def get_hook_lora(patch_list, key):
     def lora_hook(module, _):
         new_weight = comfy.lora.calculate_weight(patch_list, module.weight, key)
-        module.weight = comfy.float.stochastic_rounding(new_weight, weight.dtype, seed=string_to_seed(key))
+        module.weight = comfy.float.stochastic_rounding(new_weight, module.weight.dtype, seed=string_to_seed(key))
     return lora_hook
 
 
@@ -432,6 +432,7 @@ class CustomChromaModelPatcher(comfy.model_patcher.ModelPatcher):
         # self.model.state_dict = lambda : {key : None for key in chroma_keys_set}
         # self.model.state_dict = lambda : {key : torch.empty(size, device = "cpu") for key, size in chroma_keys_dict.items()}
         self.model.state_dict = patch_state_dict(self.model.state_dict)
+    
 
     def _load_list(self):
         loading = []
@@ -586,5 +587,10 @@ class CustomChromaModelPatcher(comfy.model_patcher.ModelPatcher):
 
             self.patches_uuid = uuid.uuid4()
             return list(p)
+    
+    '''
+    def clone(self):
+        return self
+    '''
             
 
