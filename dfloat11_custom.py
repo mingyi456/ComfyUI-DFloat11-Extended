@@ -390,7 +390,6 @@ from comfy.model_patcher import LowVramPatch
 from comfy.model_patcher import get_key_weight, wipe_lowvram_weight, move_weight_functions, string_to_seed
 from comfy.patcher_extension import CallbacksMP
 
-from .state_dict_keys import flux_keys_set, chroma_keys_set
 from .state_dict_shapes import chroma_keys_dict
 
 def df11_module_size(module):
@@ -406,8 +405,9 @@ def df11_module_size(module):
     return module_mem
 
 def patch_state_dict(state_dict_func):
-    lora_loading_functions = {"model_lora_keys_unet"}
-    fake_state_dict = {key : None for key in chroma_keys_set}
+    lora_loading_functions = {"model_lora_keys_unet", "add_patches"}
+    
+    fake_state_dict = {f"diffusion_model.{key}" : None for key in chroma_keys_dict}
     def new_state_dict_func():
         call_stack = inspect.stack()
         caller_function = call_stack[1].function
@@ -420,7 +420,7 @@ def patch_state_dict(state_dict_func):
 
 
 def get_hook_lora(patch_list, key):
-    def lora_hook(module, _):
+    def lora_hook(module, input):
         new_weight = comfy.lora.calculate_weight(patch_list, module.weight, key)
         module.weight = comfy.float.stochastic_rounding(new_weight, module.weight.dtype, seed=string_to_seed(key))
     return lora_hook
@@ -429,8 +429,6 @@ def get_hook_lora(patch_list, key):
 class CustomChromaModelPatcher(comfy.model_patcher.ModelPatcher):
     def __init__(self, model, load_device, offload_device, size=0, weight_inplace_update=False):
         super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
-        # self.model.state_dict = lambda : {key : None for key in chroma_keys_set}
-        # self.model.state_dict = lambda : {key : torch.empty(size, device = "cpu") for key, size in chroma_keys_dict.items()}
         self.model.state_dict = patch_state_dict(self.model.state_dict)
     
 
@@ -460,7 +458,6 @@ class CustomChromaModelPatcher(comfy.model_patcher.ModelPatcher):
 
             load_completely = []
             loading.sort(reverse=True)
-            # print(f"CustomChromaModelPatcher.load(), {self.patches = }\n")
             for x in loading:
                 n = x[1]
                 m = x[2]
@@ -564,33 +561,4 @@ class CustomChromaModelPatcher(comfy.model_patcher.ModelPatcher):
             self.apply_hooks(self.forced_hooks, force_apply=True)
 
 
-    def add_patches(self, patches, strength_patch=1.0, strength_model=1.0):
-        with self.use_ejected():
-            p = set()
-            model_sd = chroma_keys_set
-            for k in patches:
-                offset = None
-                function = None
-                if isinstance(k, str):
-                    key = k
-                else:
-                    offset = k[1]
-                    key = k[0]
-                    if len(k) > 2:
-                        function = k[2]
-                
-                if key in model_sd:
-                    p.add(k)
-                    current_patches = self.patches.get(key, [])
-                    current_patches.append((strength_patch, patches[k], strength_model, offset, function))
-                    self.patches[key] = current_patches
-
-            self.patches_uuid = uuid.uuid4()
-            return list(p)
-    
-    '''
-    def clone(self):
-        return self
-    '''
-            
 
