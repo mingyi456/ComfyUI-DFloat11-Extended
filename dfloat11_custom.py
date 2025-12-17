@@ -426,10 +426,18 @@ def get_hook_lora(patch_list, key):
     return lora_hook
 
 
-class CustomChromaModelPatcher(comfy.model_patcher.ModelPatcher):
+class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
+    """
+    Base ModelPatcher for all DFloat11 compressed models.
+    Handles the generic DFloat11 weight format that removes the 'weight' attribute
+    from compressed layers and uses custom decompression hooks.
+    
+    This class MUST be used for all DFloat11 models because the standard ModelPatcher
+    will fail when trying to access .weight on compressed layers.
+    """
+    
     def __init__(self, model, load_device, offload_device, size=0, weight_inplace_update=False):
         super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
-        self.model.state_dict = patch_state_dict(self.model.state_dict)
     
     def partially_unload(self, offload_device, memory_to_free=0):
         """
@@ -441,6 +449,10 @@ class CustomChromaModelPatcher(comfy.model_patcher.ModelPatcher):
         return 0
 
     def _load_list(self):
+        """
+        Override to handle DFloat11 compressed modules that don't have a 'weight' attribute.
+        Uses module_size instead of get_key_weight which would fail on compressed layers.
+        """
         loading = []
         for n, module in self.model.named_modules():
             params = []
@@ -449,7 +461,7 @@ class CustomChromaModelPatcher(comfy.model_patcher.ModelPatcher):
                 params.append(name)
             for name, param in module.named_parameters(recurse=True):
                 if name not in params:
-                    skip = True # skip random weights in non leaf modules
+                    skip = True  # skip random weights in non leaf modules
                     break
             if not skip and (hasattr(module, "comfy_cast_weights") or len(params) > 0):
                 loading.append((comfy.model_management.module_size(module), n, module, params))
@@ -481,7 +493,7 @@ class CustomChromaModelPatcher(comfy.model_patcher.ModelPatcher):
                     if mem_counter + module_mem >= lowvram_model_memory:
                         lowvram_weight = True
                         lowvram_counter += 1
-                        if hasattr(m, "prev_comfy_cast_weights"): #Already lowvramed
+                        if hasattr(m, "prev_comfy_cast_weights"):  # Already lowvramed
                             continue
 
                 cast_weight = self.force_cast_weights
@@ -531,7 +543,7 @@ class CustomChromaModelPatcher(comfy.model_patcher.ModelPatcher):
             for x in load_completely:
                 n = x[1]
                 m = x[2]
-                params = x[3] # ['weight', 'bias']
+                params = x[3]
                 if hasattr(m, "comfy_patched_weights"):
                     if m.comfy_patched_weights == True:
                         continue
@@ -568,5 +580,19 @@ class CustomChromaModelPatcher(comfy.model_patcher.ModelPatcher):
 
             self.apply_hooks(self.forced_hooks, force_apply=True)
 
+
+class CustomChromaModelPatcher(DFloat11ModelPatcher):
+    """
+    ModelPatcher specifically for Chroma models with DFloat11 compression.
+    Adds Chroma-specific state_dict patching for LoRA compatibility.
+    
+    This is an experimental class that enables LoRA loading for Chroma models
+    by providing a fake state_dict that matches the expected Chroma key structure.
+    """
+    
+    def __init__(self, model, load_device, offload_device, size=0, weight_inplace_update=False):
+        super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
+        # Chroma-specific: patch state_dict for LoRA loading
+        self.model.state_dict = patch_state_dict(self.model.state_dict)
 
 
