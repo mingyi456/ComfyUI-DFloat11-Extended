@@ -481,7 +481,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
             for x in loading:
                 n = x[1]
                 m = x[2]
-                params = x[3] # ['weight', 'bias']
+                params = x[3]
                 module_mem = x[0]
 
                 lowvram_weight = False
@@ -543,7 +543,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
             for x in load_completely:
                 n = x[1]
                 m = x[2]
-                params = x[3]
+                params = x[3] # ['weight', 'bias']
                 if hasattr(m, "comfy_patched_weights"):
                     if m.comfy_patched_weights == True:
                         continue
