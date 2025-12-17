@@ -489,7 +489,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                     if mem_counter + module_mem >= lowvram_model_memory:
                         lowvram_weight = True
                         lowvram_counter += 1
-                        if hasattr(m, "prev_comfy_cast_weights"): # Already lowvramed
+                        if hasattr(m, "prev_comfy_cast_weights"): #Already lowvramed
                             continue
 
                 cast_weight = self.force_cast_weights
