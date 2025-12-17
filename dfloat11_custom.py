@@ -449,10 +449,6 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
         return 0
 
     def _load_list(self):
-        """
-        Override to handle DFloat11 compressed modules that don't have a 'weight' attribute.
-        Uses module_size instead of get_key_weight which would fail on compressed layers.
-        """
         loading = []
         for n, module in self.model.named_modules():
             params = []
@@ -461,7 +457,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                 params.append(name)
             for name, param in module.named_parameters(recurse=True):
                 if name not in params:
-                    skip = True  # skip random weights in non leaf modules
+                    skip = True # skip random weights in non leaf modules
                     break
             if not skip and (hasattr(module, "comfy_cast_weights") or len(params) > 0):
                 loading.append((comfy.model_management.module_size(module), n, module, params))
@@ -493,7 +489,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                     if mem_counter + module_mem >= lowvram_model_memory:
                         lowvram_weight = True
                         lowvram_counter += 1
-                        if hasattr(m, "prev_comfy_cast_weights"):  # Already lowvramed
+                        if hasattr(m, "prev_comfy_cast_weights"): # Already lowvramed
                             continue
 
                 cast_weight = self.force_cast_weights
