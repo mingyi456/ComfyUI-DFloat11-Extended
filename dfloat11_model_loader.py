@@ -77,7 +77,7 @@ class DFloat11ModelLoaderAdvanced:
             pin_memory=pin_memory,
         )
 
-        if df11_type == "Chroma" and custom_modelpatcher:
+        if custom_modelpatcher:
             return (
                 CustomChromaModelPatcher(model, load_device=load_device, offload_device=offload_device),
             )
@@ -208,7 +208,7 @@ class DFloat11DiffusersModelLoader:
         )
 
         return (
-            comfy.model_patcher.ModelPatcher(model, load_device=load_device, offload_device=offload_device),
+            CustomChromaModelPatcher(model, load_device=load_device, offload_device=offload_device),
         )
 
 class DFloat11ModelCompressor:
