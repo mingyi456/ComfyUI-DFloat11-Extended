@@ -5,7 +5,7 @@ import os
 
 from nodes import CheckpointLoaderSimple
 from dfloat11 import DFloat11Model, compress_model
-from .dfloat11_custom import DFloat11FluxDiffusersModel, CustomChromaModelPatcher
+from .dfloat11_custom import DFloat11FluxDiffusersModel, DFloat11ModelPatcher, CustomChromaModelPatcher
 from .convert_fixed_tensors import convert_diffusers_to_comfyui_flux
 from .pattern_dict import MODEL_TO_PATTERN_DICT
 
@@ -77,12 +77,16 @@ class DFloat11ModelLoaderAdvanced:
             pin_memory=pin_memory,
         )
 
+        # Always use DFloat11ModelPatcher for DF11 models (required due to missing .weight attributes)
+        # Use CustomChromaModelPatcher for Chroma models if custom_modelpatcher is enabled (adds LoRA support)
         if df11_type == "Chroma" and custom_modelpatcher:
             return (
                 CustomChromaModelPatcher(model, load_device=load_device, offload_device=offload_device),
             )
+        
+        # For all other DF11 models, use the base DFloat11ModelPatcher
         return (
-            comfy.model_patcher.ModelPatcher(model, load_device=load_device, offload_device=offload_device),
+            DFloat11ModelPatcher(model, load_device=load_device, offload_device=offload_device),
         )
 
 class DFloat11ModelLoader(DFloat11ModelLoaderAdvanced):
@@ -208,7 +212,7 @@ class DFloat11DiffusersModelLoader:
         )
 
         return (
-            comfy.model_patcher.ModelPatcher(model, load_device=load_device, offload_device=offload_device),
+            CustomChromaModelPatcher(model, load_device=load_device, offload_device=offload_device),
         )
 
 class DFloat11ModelCompressor:

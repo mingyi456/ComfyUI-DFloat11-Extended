@@ -426,11 +426,30 @@ def get_hook_lora(patch_list, key):
     return lora_hook
 
 
-class CustomChromaModelPatcher(comfy.model_patcher.ModelPatcher):
+class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
+    """
+    Base ModelPatcher for all DFloat11 compressed models.
+    Handles the generic DFloat11 weight format that removes the 'weight' attribute
+    from compressed layers and uses custom decompression hooks.
+    
+    This class MUST be used for all DFloat11 models because the standard ModelPatcher
+    will fail when trying to access .weight on compressed layers.
+    """
+    
     def __init__(self, model, load_device, offload_device, size=0, weight_inplace_update=False):
         super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
-        self.model.state_dict = patch_state_dict(self.model.state_dict)
     
+    def partially_unload(self, offload_device, memory_to_free=0):
+        """
+        DFloat11 compressed modules don't have a standard '.weight' attribute - 
+        it's replaced with compressed tensors (encoded_exponent, sign_mantissa, etc.).
+        ComfyUI's partial unloading mechanism uses get_key_weight() which fails
+        on these modules, causing type comparison errors.
+        
+        TODO: Implement proper partial unloading that understands DFloat11's
+        compressed tensor structure.
+        """
+        return 0
 
     def _load_list(self):
         loading = []
@@ -560,5 +579,19 @@ class CustomChromaModelPatcher(comfy.model_patcher.ModelPatcher):
 
             self.apply_hooks(self.forced_hooks, force_apply=True)
 
+
+class CustomChromaModelPatcher(DFloat11ModelPatcher):
+    """
+    ModelPatcher specifically for Chroma models with DFloat11 compression.
+    Adds Chroma-specific state_dict patching for LoRA compatibility.
+    
+    This is an experimental class that enables LoRA loading for Chroma models
+    by providing a fake state_dict that matches the expected Chroma key structure.
+    """
+    
+    def __init__(self, model, load_device, offload_device, size=0, weight_inplace_update=False):
+        super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
+        # Chroma-specific: patch state_dict for LoRA loading
+        self.model.state_dict = patch_state_dict(self.model.state_dict)
 
 
