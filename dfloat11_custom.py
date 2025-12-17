@@ -481,7 +481,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
             for x in loading:
                 n = x[1]
                 m = x[2]
-                params = x[3]
+                params = x[3] # ['weight', 'bias']
                 module_mem = x[0]
 
                 lowvram_weight = False
