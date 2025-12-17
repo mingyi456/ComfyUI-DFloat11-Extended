@@ -431,6 +431,14 @@ class CustomChromaModelPatcher(comfy.model_patcher.ModelPatcher):
         super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
         self.model.state_dict = patch_state_dict(self.model.state_dict)
     
+    def partially_unload(self, offload_device, memory_to_free=0):
+        """
+        Override to disable partial unloading for DFloat11 models.
+        DFloat11 models use a custom compressed weight format that is 
+        incompatible with ComfyUI's standard partial unloading mechanism.
+        The DFloat11 system already handles its own memory management through CPU offloading.
+        """
+        return 0
 
     def _load_list(self):
         loading = []
