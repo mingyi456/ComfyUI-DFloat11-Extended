@@ -447,7 +447,6 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
     Base ModelPatcher for all DFloat11 compressed models.
     Handles the generic DFloat11 weight format that removes the 'weight' attribute
     from compressed layers and uses custom decompression hooks.
-
     This class MUST be used for all DFloat11 models because the standard ModelPatcher
     will fail when trying to access .weight on compressed layers.
     """
@@ -480,7 +479,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                 params.append(name)
             for name, param in module.named_parameters(recurse=True):
                 if name not in params:
-                    skip = True  # skip random weights in non leaf modules
+                    skip = True # skip random weights in non leaf modules
                     break
             if not skip and (hasattr(module, "comfy_cast_weights") or len(params) > 0):
                 loading.append((comfy.model_management.module_size(module), n, module, params))
@@ -512,7 +511,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                     if mem_counter + module_mem >= lowvram_model_memory:
                         lowvram_weight = True
                         lowvram_counter += 1
-                        if hasattr(m, "prev_comfy_cast_weights"):  #Already lowvramed
+                        if hasattr(m, "prev_comfy_cast_weights"): #Already lowvramed
                             continue
 
                 cast_weight = self.force_cast_weights
