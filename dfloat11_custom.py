@@ -32,6 +32,9 @@ from dfloat11.dfloat11_utils import get_codec, get_32bit_codec, get_luts, encode
 
 from .convert_fixed_tensors import convert_diffusers_to_comfyui_flux
 
+from .state_dict_shapes import chroma_keys_dict, flux_keys_dict, zimage_keys_dict
+
+
 ptx_path = pkg_resources.resource_filename("dfloat11", "decode.ptx")
 _decode = cp.RawModule(path=ptx_path).get_function('decode')
 
@@ -390,7 +393,21 @@ from comfy.model_patcher import LowVramPatch
 from comfy.model_patcher import get_key_weight, wipe_lowvram_weight, move_weight_functions, string_to_seed
 from comfy.patcher_extension import CallbacksMP
 
-from .state_dict_shapes import chroma_keys_dict
+def patch_state_dict_zimage(state_dict_func):
+    lora_loading_functions = {"model_lora_keys_unet", "add_patches"}
+    
+    # We assume ComfyUI prefixes keys with "diffusion_model."
+    fake_state_dict = {f"diffusion_model.{key}" : None for key in zimage_keys_dict}
+    
+    def new_state_dict_func():
+        call_stack = inspect.stack()
+        caller_function = call_stack[1].function
+        del call_stack
+        if caller_function in lora_loading_functions:
+            return fake_state_dict
+
+        return state_dict_func()
+    return new_state_dict_func
 
 def df11_module_size(module):
     module_mem = 0
@@ -441,17 +458,18 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
     
     def partially_unload(self, offload_device, memory_to_free=0):
         """
-        DFloat11 compressed modules don't have a standard '.weight' attribute - 
-        it's replaced with compressed tensors (encoded_exponent, sign_mantissa, etc.).
-        ComfyUI's partial unloading mechanism uses get_key_weight() which fails
-        on these modules, causing type comparison errors.
-        
-        TODO: Implement proper partial unloading that understands DFloat11's
-        compressed tensor structure.
+        Override to disable partial unloading for DFloat11 models.
+        DFloat11 models use a custom compressed weight format that is 
+        incompatible with ComfyUI's standard partial unloading mechanism.
+        The DFloat11 system already handles its own memory management through CPU offloading.
         """
         return 0
 
     def _load_list(self):
+        """
+        Override to handle DFloat11 compressed modules that don't have a 'weight' attribute.
+        Uses module_size instead of get_key_weight which would fail on compressed layers.
+        """
         loading = []
         for n, module in self.model.named_modules():
             params = []
@@ -460,7 +478,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                 params.append(name)
             for name, param in module.named_parameters(recurse=True):
                 if name not in params:
-                    skip = True # skip random weights in non leaf modules
+                    skip = True  # skip random weights in non leaf modules
                     break
             if not skip and (hasattr(module, "comfy_cast_weights") or len(params) > 0):
                 loading.append((comfy.model_management.module_size(module), n, module, params))
@@ -492,7 +510,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                     if mem_counter + module_mem >= lowvram_model_memory:
                         lowvram_weight = True
                         lowvram_counter += 1
-                        if hasattr(m, "prev_comfy_cast_weights"): #Already lowvramed
+                        if hasattr(m, "prev_comfy_cast_weights"):  #Already lowvramed
                             continue
 
                 cast_weight = self.force_cast_weights
@@ -593,5 +611,15 @@ class CustomChromaModelPatcher(DFloat11ModelPatcher):
         super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
         # Chroma-specific: patch state_dict for LoRA loading
         self.model.state_dict = patch_state_dict(self.model.state_dict)
+
+
+class CustomZImageModelPatcher(DFloat11ModelPatcher):
+    """
+    ModelPatcher specifically for ZImage models with DFloat11 compression.
+    """
+    def __init__(self, model, load_device, offload_device, size=0, weight_inplace_update=False):
+        super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
+        # Override state_dict to serve the fake keys for LoRA loading
+        self.model.state_dict = patch_state_dict_zimage(self.model.state_dict)
 
 
