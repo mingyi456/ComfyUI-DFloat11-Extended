@@ -458,10 +458,13 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
     
     def partially_unload(self, offload_device, memory_to_free=0):
         """
-        Override to disable partial unloading for DFloat11 models.
-        DFloat11 models use a custom compressed weight format that is 
-        incompatible with ComfyUI's standard partial unloading mechanism.
-        The DFloat11 system already handles its own memory management through CPU offloading.
+        DFloat11 compressed modules don't have a standard '.weight' attribute - 
+        it's replaced with compressed tensors (encoded_exponent, sign_mantissa, etc.).
+        ComfyUI's partial unloading mechanism uses get_key_weight() which fails
+        on these modules, causing type comparison errors.
+        
+        TODO: Implement proper partial unloading that understands DFloat11's
+        compressed tensor structure.
         """
         return 0
 
