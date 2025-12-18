@@ -445,10 +445,9 @@ def get_hook_lora(patch_list, key):
 
 class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
     """
-    DFloat11 compressed modules don't have a standard '.weight' attribute - 
-    it's replaced with compressed tensors (encoded_exponent, sign_mantissa, etc.).
-    ComfyUI's partial unloading mechanism uses get_key_weight() which fails
-    on these modules, causing type comparison errors.
+    Base ModelPatcher for all DFloat11 compressed models.
+    Handles the generic DFloat11 weight format that removes the 'weight' attribute
+    from compressed layers and uses custom decompression hooks.
     
     TODO: Implement proper partial unloading that understands DFloat11's
     compressed tensor structure.
