@@ -32,9 +32,6 @@ from dfloat11.dfloat11_utils import get_codec, get_32bit_codec, get_luts, encode
 
 from .convert_fixed_tensors import convert_diffusers_to_comfyui_flux
 
-from .state_dict_shapes import chroma_keys_dict, flux_keys_dict, zimage_keys_dict
-
-
 ptx_path = pkg_resources.resource_filename("dfloat11", "decode.ptx")
 _decode = cp.RawModule(path=ptx_path).get_function('decode')
 
@@ -392,6 +389,8 @@ import inspect
 from comfy.model_patcher import LowVramPatch
 from comfy.model_patcher import get_key_weight, wipe_lowvram_weight, move_weight_functions, string_to_seed
 from comfy.patcher_extension import CallbacksMP
+
+from .state_dict_shapes import chroma_keys_dict, flux_keys_dict, zimage_keys_dict
 
 def patch_state_dict_zimage(state_dict_func):
     lora_loading_functions = {"model_lora_keys_unet", "add_patches"}
