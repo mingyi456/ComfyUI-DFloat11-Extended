@@ -1429,3 +1429,41 @@ flux_keys_dict = {
     "vector_in.out_layer.bias" : torch.Size([3072]),
     "vector_in.out_layer.weight" : torch.Size([3072, 3072]),
 }
+
+zimage_keys_dict = {}
+
+# --- Helper logic to generate the dict compactly ---
+# Hidden Size = 3840
+# Intermediate Size = 10240
+# QKV = 3 * 3840 = 11520
+# AdaLN = 1024 (derived from remaining rows)
+
+# 1. Define the shapes for the components
+common_shapes = {
+    "attention.qkv.weight": torch.Size([11520, 3840]),
+    "attention.out.weight": torch.Size([3840, 3840]),
+    "feed_forward.w1.weight": torch.Size([10240, 3840]),
+    "feed_forward.w2.weight": torch.Size([3840, 10240]), # Note: Transposed input/output for W2
+    "feed_forward.w3.weight": torch.Size([10240, 3840]),
+}
+
+# 2. Define block counts
+blocks_config = [
+    ("context_refiner", 2, False), # Name, Count, Has_AdaLN
+    ("layers", 30, True),
+    ("noise_refiner", 2, True),
+]
+
+# 3. Build the dictionary
+for prefix, count, has_adaln in blocks_config:
+    for i in range(count):
+        # Add standard layers
+        for suffix, shape in common_shapes.items():
+            zimage_keys_dict[f"{prefix}.{i}.{suffix}"] = shape
+        
+        # Add AdaLN if present (Only in layers and noise_refiner)
+        if has_adaln:
+            zimage_keys_dict[f"{prefix}.{i}.adaLN_modulation.0.weight"] = torch.Size([1024, 3840])
+
+# Explicitly added to module export
+__all__ = ["chroma_keys_dict", "flux_keys_dict", "zimage_keys_dict"]
