@@ -50,12 +50,6 @@ def register_lora_for_df11_module(module: nn.Module, weight_key: str, patch_list
     
     This hook reconstructs full-precision weights from compressed representations
     using a custom CUDA kernel during the forward pass.
-
-    Args:
-        module: The DFloat11 compressed module (has encoded_exponent, etc.)
-        weight_key: The full key for the weight (e.g., "diffusion_model.double_blocks.0.img_attn.qkv.weight")
-        patch_list: The LoRA patch list from model_patcher.patches
-        submodule: The actual submodule that will receive the weight (if different from module)
     """
     module_id = id(module)
     if module_id not in _module_lora_patches:
