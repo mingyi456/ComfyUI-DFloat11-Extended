@@ -632,6 +632,14 @@ def clear_all_df11_lora_patches():
     """Clear all registered LoRA patches."""
     _module_lora_patches.clear()
 
+def apply_lora_to_weight(weight: torch.Tensor, weight_key: str, patch_list: List) -> torch.Tensor:
+    """Apply LoRA patches to a weight tensor."""
+    if not patch_list:
+        return weight
+    patched_weight = comfy.lora.calculate_weight(patch_list, weight, weight_key)
+    result = comfy.float.stochastic_rounding(patched_weight, weight.dtype, seed=string_to_seed(weight_key))
+    return result
+
 
 def get_hook_flux_with_lora(threads_per_block, bytes_per_thread):
     """
