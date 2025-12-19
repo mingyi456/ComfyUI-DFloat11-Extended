@@ -2,6 +2,7 @@ import comfy
 import folder_paths
 import torch
 import torch.nn as nn
+
 import logging
 import inspect
 import os
@@ -268,6 +269,7 @@ def load_and_replace_tensors_flux_diffusers(
     return model
 
     
+
 class DFloat11FluxDiffusersModel(DFloat11Model):
     def __init__(self):
         super().__init__()
@@ -454,7 +456,9 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
     """
     def __init__(self, model, load_device, offload_device, size=0, weight_inplace_update=False):
         super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
+
         self.model.state_dict = self._patch_state_dict(self.model.state_dict)
+        # List to keep track of PyTorch hooks so we can remove them later
         self.lora_hook_handles = []
 
     def partially_unload(self, offload_device, memory_to_free=0):
@@ -486,12 +490,9 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
             call_stack = inspect.stack()
             caller_function = call_stack[1].function
             del call_stack
-            
             if caller_function in lora_loading_functions:
                 return fake_state_dict
-            
             return state_dict_func()
-        
         return new_state_dict_func
 
     def _load_list(self):
@@ -503,7 +504,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                 params.append(name)
             for name, param in module.named_parameters(recurse=True):
                 if name not in params:
-                    skip = True # skip random weights in non leaf modules 
+                    skip = True # skip random weights in non leaf modules
                     break
             if not skip and (hasattr(module, "comfy_cast_weights") or len(params) > 0):
                 loading.append((comfy.model_management.module_size(module), n, module, params))
@@ -552,9 +553,9 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
 
             mem_counter = 0
             loading = self._load_list()
+
             load_completely = []
             loading.sort(reverse=True)
-
             for x in loading:
                 n = x[1]
                 m = x[2]
