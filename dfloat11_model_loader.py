@@ -5,9 +5,14 @@ import os
 
 from nodes import CheckpointLoaderSimple
 from dfloat11 import DFloat11Model, compress_model
-from .dfloat11_custom import DFloat11FluxDiffusersModel, DFloat11ModelPatcher
+from .dfloat11_custom import (
+    DFloat11FluxDiffusersModel, 
+    DFloat11ModelPatcher,
+    DFloat11ModelPatcherWithLoRA,
+)
 from .convert_fixed_tensors import convert_diffusers_to_comfyui_flux
 from .pattern_dict import MODEL_TO_PATTERN_DICT
+
 
 class DFloat11ModelLoaderAdvanced:
     """
@@ -16,12 +21,6 @@ class DFloat11ModelLoaderAdvanced:
     DFloat11 models are >30% smaller than their float16 counterparts, yet produce bit-for-bit identical outputs.
     """
 
-    '''
-    max_memory: Maximum memory allocation per device
-    cpu_offload: Enables CPU offloading; only keeps a single block of weights in GPU at once
-    cpu_offload_blocks: Number of transformer blocks to offload to CPU; if None, offload all blocks
-    pin_memory: Enables memory-pinning/page-locking when using CPU offloading
-    '''
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -30,7 +29,7 @@ class DFloat11ModelLoaderAdvanced:
                 "cpu_offload": ("BOOLEAN", {"default": False, "tooltip": "Whether to offload to CPU RAM"}),
                 "cpu_offload_blocks": ("INT", {"default": 0, "min": 0, "max": 999, "step": 1, "tooltip": "If set to 0, all blocks will be offloaded to CPU RAM"}),
                 "pin_memory": ("BOOLEAN", {"default": True, "tooltip": "Whether to lock/pin the weights to CPU RAM. Enabling this option increases RAM usage (which might cause OOM), but should increase speed"}),
-                "custom_modelpatcher": ("BOOLEAN", {"default": True, "tooltip": "Whether to use the experimental custom ModelPatcher. Currently only enabled for Chroma"}),
+                "enable_lora": ("BOOLEAN", {"default": True, "tooltip": "Whether to enable LoRA support. Disable for slightly better performance if not using LoRAs"}),
             }
         }
 
@@ -38,7 +37,7 @@ class DFloat11ModelLoaderAdvanced:
     FUNCTION = "load_dfloat11_model_advanced"
     CATEGORY = "DFloat11"
 
-    def load_dfloat11_model_advanced(self, dfloat11_model_name, cpu_offload, cpu_offload_blocks, pin_memory, custom_modelpatcher):
+    def load_dfloat11_model_advanced(self, dfloat11_model_name, cpu_offload, cpu_offload_blocks, pin_memory, enable_lora):
         if not cpu_offload:
             cpu_offload_blocks = 0
             pin_memory = True
@@ -65,7 +64,6 @@ class DFloat11ModelLoaderAdvanced:
         model_config.set_inference_dtype(torch.bfloat16, torch.bfloat16)
         model = model_config.get_model(state_dict, "")
         model = model.to(offload_device)
-        
 
         DFloat11Model.from_single_file(
             dfloat11_model_path,
@@ -77,11 +75,14 @@ class DFloat11ModelLoaderAdvanced:
             pin_memory=pin_memory,
         )
 
-        # Always use DFloat11ModelPatcher for DF11 models (required due to missing .weight attributes
+        # Choose patcher based on LoRA support requirement
+        if enable_lora:
+            patcher = DFloat11ModelPatcherWithLoRA(model, load_device=load_device, offload_device=offload_device)
+        else:
+            patcher = DFloat11ModelPatcher(model, load_device=load_device, offload_device=offload_device)
 
-        return (
-            DFloat11ModelPatcher(model, load_device=load_device, offload_device=offload_device),
-        )
+        return (patcher,)
+
 
 class DFloat11ModelLoader(DFloat11ModelLoaderAdvanced):
     """
@@ -101,7 +102,15 @@ class DFloat11ModelLoader(DFloat11ModelLoaderAdvanced):
     FUNCTION = "load_dfloat11_model"
     
     def load_dfloat11_model(self, dfloat11_model_name):
-        return self.load_dfloat11_model_advanced(dfloat11_model_name, cpu_offload = False, cpu_offload_blocks = 0, pin_memory = True, custom_modelpatcher = True)
+        # Default to LoRA enabled for simple loader
+        return self.load_dfloat11_model_advanced(
+            dfloat11_model_name, 
+            cpu_offload=False, 
+            cpu_offload_blocks=0, 
+            pin_memory=True, 
+            enable_lora=True
+        )
+
 
 class CheckpointLoaderWithDFloat11(CheckpointLoaderSimple):
     @classmethod
@@ -110,6 +119,7 @@ class CheckpointLoaderWithDFloat11(CheckpointLoaderSimple):
             "required": {
                 "ckpt_name": (folder_paths.get_filename_list("checkpoints"), {"tooltip": "The name of the checkpoint (model) to load."}),
                 "dfloat11_model_name": (folder_paths.get_filename_list("diffusion_models"), {"tooltip": "The diffusion model in DF11 format."}),
+                "enable_lora": ("BOOLEAN", {"default": True, "tooltip": "Whether to enable LoRA support"}),
             }
         }
 
@@ -117,7 +127,7 @@ class CheckpointLoaderWithDFloat11(CheckpointLoaderSimple):
     CATEGORY = "DFloat11"
     DESCRIPTION = "Loads a diffusion model checkpoint, along with a DF11 unet."
     
-    def load_checkpoint_with_df11(self, ckpt_name, dfloat11_model_name):
+    def load_checkpoint_with_df11(self, ckpt_name, dfloat11_model_name, enable_lora=True):
         ckpt_path = folder_paths.get_full_path_or_raise("checkpoints", ckpt_name)
         out = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, embedding_directory=folder_paths.get_folder_paths("embeddings"))
         diffusion_model, clip, vae, *_ = out
@@ -137,8 +147,26 @@ class CheckpointLoaderWithDFloat11(CheckpointLoaderSimple):
             device=offload_device,
         )
         
-        return (diffusion_model, clip, vae)
-
+        # Replace the model patcher with DF11-aware version
+        if enable_lora:
+            # Create new patcher with LoRA support
+            new_patcher = DFloat11ModelPatcherWithLoRA(
+                diffusion_model.model, 
+                load_device=load_device, 
+                offload_device=offload_device
+            )
+        else:
+            new_patcher = DFloat11ModelPatcher(
+                diffusion_model.model,
+                load_device=load_device,
+                offload_device=offload_device
+            )
+        
+        # Copy over any existing patcher state
+        new_patcher.patches = diffusion_model.patches
+        new_patcher.object_patches = diffusion_model.object_patches
+        
+        return (new_patcher, clip, vae)
 
 
 class DFloat11DiffusersModelLoader:
@@ -153,7 +181,8 @@ class DFloat11DiffusersModelLoader:
         return {
             "required": {
                 "dfloat11_model_name": (folder_paths.get_filename_list("diffusion_models"),),
-                "model_type": (["Flux",],)
+                "model_type": (["Flux",],),
+                "enable_lora": ("BOOLEAN", {"default": True, "tooltip": "Whether to enable LoRA support"}),
             }
         }
 
@@ -161,10 +190,9 @@ class DFloat11DiffusersModelLoader:
     FUNCTION = "load_dfloat11_model"
     CATEGORY = "DFloat11"
 
-    def load_dfloat11_model(self, dfloat11_model_name, model_type):
+    def load_dfloat11_model(self, dfloat11_model_name, model_type, enable_lora=True):
         dfloat11_model_path = folder_paths.get_full_path_or_raise("diffusion_models", dfloat11_model_name)
         
-        # state_dict = convert_diffusers_to_comfyui_flux(comfy.utils.load_torch_file(dfloat11_model_path))
         state_dict = comfy.utils.load_torch_file(dfloat11_model_path)
         
         if not any(k.endswith("encoded_exponent") for k in state_dict.keys()):
@@ -205,9 +233,14 @@ class DFloat11DiffusersModelLoader:
             device=offload_device,
         )
 
-        return (
-            CustomChromaModelPatcher(model, load_device=load_device, offload_device=offload_device),
-        )
+        # Choose patcher based on LoRA support requirement
+        if enable_lora:
+            patcher = DFloat11ModelPatcherWithLoRA(model, load_device=load_device, offload_device=offload_device)
+        else:
+            patcher = DFloat11ModelPatcher(model, load_device=load_device, offload_device=offload_device)
+
+        return (patcher,)
+
 
 class DFloat11ModelCompressor:
     """
@@ -238,10 +271,10 @@ class DFloat11ModelCompressor:
         compress_model(
             model=model.model.diffusion_model,
             pattern_dict=MODEL_TO_PATTERN_DICT[model_type],
-            save_path= save_path,
-            save_single_file= True,
-            check_correctness= True,
-            block_range= (0, 100),
+            save_path=save_path,
+            save_single_file=True,
+            check_correctness=True,
+            block_range=(0, 100),
         )
 
         return (save_path,)
