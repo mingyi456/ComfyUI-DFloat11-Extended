@@ -102,8 +102,10 @@ def apply_lora_to_weight(weight: torch.Tensor, weight_key: str, patch_list: List
 
 def get_hook_flux_diffusers(threads_per_block, bytes_per_thread):
     """
-    Creates a PyTorch forward pre-hook that decodes compressed DFloat11 weights on-the-fly
-    and optionally applies LoRA patches after decompression.
+    Creates a PyTorch forward pre-hook that decodes compressed DFloat11 weights on-the-fly.
+    
+    This hook reconstructs full-precision weights from compressed representations
+    using a custom CUDA kernel during the forward pass.
     
     Args:
         threads_per_block: CUDA thread configuration 
@@ -148,102 +150,42 @@ def get_hook_flux_diffusers(threads_per_block, bytes_per_thread):
                 n_luts, n_bytes, n_elements
             ])
 
-        # Get LoRA patches for this module (if any)
-        module_id = id(module)
-        lora_patches = _module_lora_patches.get(module_id, [])
-        
-        # Build a lookup dict for faster LoRA matching
-        # Maps submodule -> (weight_key, patch_list)
-        lora_by_submodule = {}
-        for weight_key, patch_list, submodule in lora_patches:
-            submodule_id = id(submodule)
-            if submodule_id not in lora_by_submodule:
-                lora_by_submodule[submodule_id] = []
-            lora_by_submodule[submodule_id].append((weight_key, patch_list))
-
         # Inject reconstructed weights into the appropriate module
         # Handle special case where weights need to be split across multiple submodules
         
+            
         if len(module.weight_injection_modules) == 10:
             # Should be double_block
             
-            reconstructed[:] = torch.cat((
-                reconstructed[0:141557760], 
-                reconstructed[160432128:169869312], 
-                reconstructed[141557760:160432128], 
-                reconstructed[169869312:]
-            ))
+            reconstructed[:] = torch.cat((reconstructed[0:141557760], reconstructed[160432128:169869312], reconstructed[141557760:160432128], reconstructed[169869312:]))
             
             weights = torch.tensor_split(reconstructed, module.split_positions)
             
-            # Define the mapping: (index, weight_slice_or_custom, out_features, in_features)
-            weight_assignments = [
-                (0, weights[0], None, None),  # img_mod.lin
-                (1, reconstructed[113246208:141557760], 9216, 3072),  # img_attn.qkv
-                (2, weights[8], None, None),  # img_attn.proj
-                (3, weights[10], None, None),  # img_mlp.0
-                (4, weights[11], None, None),  # img_mlp.2
-                (5, weights[1], None, None),  # txt_mod.lin
-                (6, reconstructed[141557760:169869312], 9216, 3072),  # txt_attn.qkv
-                (7, weights[9], None, None),  # txt_attn.proj
-                (8, weights[12], None, None),  # txt_mlp.0
-                (9, weights[13], None, None),  # txt_mlp.2
-            ]
+            module.weight_injection_modules[0].weight = weights[0].view(module.weight_injection_modules[0].out_features, module.weight_injection_modules[0].in_features) # img_mod.lin
+            module.weight_injection_modules[1].weight = reconstructed[113246208 : 141557760].view(9216, 3072) # img_attn.qkv
+            module.weight_injection_modules[2].weight = weights[8].view(module.weight_injection_modules[2].out_features, module.weight_injection_modules[2].in_features) # img_attn.proj
+            module.weight_injection_modules[3].weight = weights[10].view(module.weight_injection_modules[3].out_features, module.weight_injection_modules[3].in_features) # img_mlp.0
+            module.weight_injection_modules[4].weight = weights[11].view(module.weight_injection_modules[4].out_features, module.weight_injection_modules[4].in_features) # img_mlp.2
+            module.weight_injection_modules[5].weight = weights[1].view(module.weight_injection_modules[5].out_features, module.weight_injection_modules[5].in_features) # txt_mod.lin
+            module.weight_injection_modules[6].weight = reconstructed[141557760 : 169869312].view(9216, 3072) # txt_attn.qkv
+            module.weight_injection_modules[7].weight = weights[9].view(module.weight_injection_modules[7].out_features, module.weight_injection_modules[7].in_features) # txt_attn.proj
+            module.weight_injection_modules[8].weight = weights[12].view(module.weight_injection_modules[8].out_features, module.weight_injection_modules[8].in_features) # txt_mlp.0
+            module.weight_injection_modules[9].weight = weights[13].view(module.weight_injection_modules[9].out_features, module.weight_injection_modules[9].in_features) # txt_mlp.2
             
-            for idx, weight_data, custom_out, custom_in in weight_assignments:
-                submodule = module.weight_injection_modules[idx]
-                
-                if custom_out is not None:
-                    final_weight = weight_data.view(custom_out, custom_in)
-                else:
-                    final_weight = weight_data.view(submodule.out_features, submodule.in_features)
-                
-                # Apply LoRA if registered for this submodule
-                submodule_id = id(submodule)
-                if submodule_id in lora_by_submodule:
-                    for weight_key, patch_list in lora_by_submodule[submodule_id]:
-                        final_weight = apply_lora_to_weight(final_weight, weight_key, patch_list)
-                
-                submodule.weight = final_weight
 
         elif len(module.weight_injection_modules) == 3:
             # Should be single_block
             
-            reconstructed[:] = torch.cat((
-                reconstructed[113246208:141557760], 
-                reconstructed[28311552:66060288], 
-                reconstructed[66060288:113246208], 
-                reconstructed[0:28311552]
-            ))
+            reconstructed[:] = torch.cat((reconstructed[113246208:141557760], reconstructed[28311552:66060288], reconstructed[66060288:113246208], reconstructed[0:28311552]))
             
             weights = torch.tensor_split(reconstructed, module.split_positions)
-            
-            # Define assignments for single_block
-            weight_assignments = [
-                (0, reconstructed[0:66060288], 21504, 3072),  # linear1
-                (1, weights[2], None, None),  # linear2
-                (2, reconstructed[113246208:141557760], 9216, 3072),  # modulation.lin
-            ]
-            
-            for idx, weight_data, custom_out, custom_in in weight_assignments:
-                submodule = module.weight_injection_modules[idx]
-                
-                if custom_out is not None:
-                    final_weight = weight_data.view(custom_out, custom_in)
-                else:
-                    final_weight = weight_data.view(submodule.out_features, submodule.in_features)
-                
-                # Apply LoRA if registered for this submodule
-                submodule_id = id(submodule)
-                if submodule_id in lora_by_submodule:
-                    for weight_key, patch_list in lora_by_submodule[submodule_id]:
-                        final_weight = apply_lora_to_weight(final_weight, weight_key, patch_list)
-                
-                submodule.weight = final_weight
+            module.weight_injection_modules[0].weight = reconstructed[0:66060288].view(21504, 3072) # linear1
+            module.weight_injection_modules[1].weight = weights[2].view(module.weight_injection_modules[1].out_features, module.weight_injection_modules[1].in_features) # linear2
+            module.weight_injection_modules[2].weight = reconstructed[113246208:141557760].view(9216, 3072) # modulation.lin
         
         else:
             raise Exception(f"{len(module.weight_injection_modules)} weight_injection_modules \n{module.weight_injection_modules}")
-        
+            
 
         # Delete tensors from GPU if offloading is enabled
         if hasattr(module, 'offloaded_tensors'):
@@ -389,6 +331,7 @@ def load_and_replace_tensors_flux_diffusers(
     return model
 
 
+    
 class DFloat11FluxDiffusersModel(DFloat11Model):
     def __init__(self):
         super().__init__()
@@ -503,7 +446,6 @@ class DFloat11FluxDiffusersModel(DFloat11Model):
                 print("Warning: Some model layers are on CPU. For inference, ensure the model is fully loaded onto CUDA-compatible GPUs.", file=stderr)
 
         return model
-
 
 import logging
 import inspect
