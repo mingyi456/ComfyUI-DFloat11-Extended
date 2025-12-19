@@ -45,8 +45,12 @@ _module_lora_patches: Dict[int, List[Tuple[str, List, Any]]] = {}
 
 def register_lora_for_df11_module(module: nn.Module, weight_key: str, patch_list: List, submodule: nn.Module = None):
     """
-    Register LoRA patches to be applied after DFloat11 decompression.
+    Creates a PyTorch forward pre-hook that decodes compressed DFloat11 weights on-the-fly.
+    Registers LoRA patches to be applied after DFloat11 decompression.
     
+    This hook reconstructs full-precision weights from compressed representations
+    using a custom CUDA kernel during the forward pass.
+
     Args:
         module: The DFloat11 compressed module (has encoded_exponent, etc.)
         weight_key: The full key for the weight (e.g., "diffusion_model.double_blocks.0.img_attn.qkv.weight")
