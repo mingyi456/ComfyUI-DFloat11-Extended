@@ -452,7 +452,10 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
         for name in state_dict_shapes.__all__:
             keys_dict = getattr(state_dict_shapes, name)
             all_keys.update(keys_dict.keys())
-        
+            
+        # TODO: Refine fake_state_dict to return only model-specific keys instead of all keys
+        # from Chroma, Flux, and Z Image. Current approach has significant key overlap between
+        # model types (e.g., Flux.1-dev vs Flux.1-schnell) which could cause issues.
         fake_state_dict = {f"diffusion_model.{key}": None for key in all_keys}
         
         def new_state_dict_func():
