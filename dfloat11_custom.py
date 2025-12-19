@@ -468,10 +468,6 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
         return 0
 
     def _load_list(self):
-        """
-        Override to handle DFloat11 compressed modules that don't have a 'weight' attribute.
-        Uses module_size instead of get_key_weight which would fail on compressed layers.
-        """
         loading = []
         for n, module in self.model.named_modules():
             params = []
