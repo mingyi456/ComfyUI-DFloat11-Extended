@@ -394,6 +394,18 @@ def get_hook_lora(patch_list, key):
         module.weight = comfy.float.stochastic_rounding(new_weight, module.weight.dtype, seed=string_to_seed(key))
     return lora_hook
 
+def df11_module_size(module):
+    module_mem = 0
+    sd = module.state_dict()
+    for k in sd:
+        t = sd[k]
+        module_mem += t.nelement() * t.element_size()
+    if hasattr(module, "encoded_exponent"):
+        module_mem += module.encoded_exponent.nelement()
+        module_mem += module.sign_mantissa.nelement()
+        
+    return module_mem
+
 
 class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
     """
