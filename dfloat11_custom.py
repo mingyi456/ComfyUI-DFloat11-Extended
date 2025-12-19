@@ -38,68 +38,6 @@ ptx_path = pkg_resources.resource_filename("dfloat11", "decode.ptx")
 _decode = cp.RawModule(path=ptx_path).get_function('decode')
 
 
-# Store for LoRA patches that need to be applied after decompression
-# Key: module id -> List of (weight_key, patch_list) tuples
-_module_lora_patches: Dict[int, List[Tuple[str, List, Any]]] = {}
-
-
-def register_lora_for_df11_module(module: nn.Module, weight_key: str, patch_list: List, submodule: nn.Module = None):
-    """
-    Creates a PyTorch forward pre-hook that decodes compressed DFloat11 weights on-the-fly.
-    Registers LoRA patches to be applied after DFloat11 decompression.
-    
-    This hook reconstructs full-precision weights from compressed representations
-    using a custom CUDA kernel during the forward pass.
-    """
-    module_id = id(module)
-    if module_id not in _module_lora_patches:
-        _module_lora_patches[module_id] = []
-    
-    _module_lora_patches[module_id].append((weight_key, patch_list, submodule or module))
-
-
-def clear_lora_for_df11_module(module: nn.Module):
-    """Clear all registered LoRA patches for a module."""
-    module_id = id(module)
-    if module_id in _module_lora_patches:
-        del _module_lora_patches[module_id]
-
-
-def clear_all_df11_lora_patches():
-    """Clear all registered LoRA patches."""
-    _module_lora_patches.clear()
-
-
-def string_to_seed(s: str) -> int:
-    """Convert a string to a deterministic seed value."""
-    import hashlib
-    return int(hashlib.md5(s.encode()).hexdigest(), 16) % (2**32)
-
-
-def apply_lora_to_weight(weight: torch.Tensor, weight_key: str, patch_list: List) -> torch.Tensor:
-    """
-    Apply LoRA patches to a weight tensor.
-    
-    Args:
-        weight: The decompressed weight tensor
-        weight_key: The key for this weight
-        patch_list: List of LoRA patches to apply
-        
-    Returns:
-        The patched weight tensor
-    """
-    if not patch_list:
-        return weight
-    
-    # Use ComfyUI's calculate_weight function
-    patched_weight = comfy.lora.calculate_weight(patch_list, weight, weight_key)
-    
-    # Apply stochastic rounding to maintain dtype
-    result = comfy.float.stochastic_rounding(patched_weight, weight.dtype, seed=string_to_seed(weight_key))
-    
-    return result
-
-
 def get_hook_flux_diffusers(threads_per_block, bytes_per_thread):
     """
     Creates a PyTorch forward pre-hook that decodes compressed DFloat11 weights on-the-fly.
@@ -452,6 +390,11 @@ import inspect
 from comfy.model_patcher import LowVramPatch, move_weight_functions, wipe_lowvram_weight, get_key_weight, string_to_seed
 from comfy.patcher_extension import CallbacksMP
 
+def get_hook_lora(patch_list, key):
+    def lora_hook(module, input):
+        new_weight = comfy.lora.calculate_weight(patch_list, module.weight, key)
+        module.weight = comfy.float.stochastic_rounding(new_weight, module.weight.dtype, seed=string_to_seed(key))
+    return lora_hook
 
 def df11_module_size(module):
     module_mem = 0
@@ -479,39 +422,8 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
         super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
 
         self.model.state_dict = self._patch_state_dict(self.model.state_dict)
-        
-        # Build mapping from weight keys to their DF11 parent modules and submodules
-        self._df11_weight_to_module_map = self._build_df11_weight_map()
-
-    def _build_df11_weight_map(self) -> Dict[str, Tuple[nn.Module, nn.Module]]:
-        """
-        Build a mapping from weight keys to (df11_parent_module, target_submodule).
-        
-        This allows us to register LoRA patches with the correct DF11 module
-        so they get applied after decompression.
-        
-        Returns:
-            Dict mapping weight key -> (df11_module, submodule)
-        """
-        weight_map = {}
-        
-        for name, module in self.model.named_modules():
-            # Check if this is a DF11 compressed module
-            if hasattr(module, 'weight_injection_modules') and hasattr(module, 'encoded_exponent'):
-                # This module has multiple submodules that receive weights
-                for submodule in module.weight_injection_modules:
-                    # Find the full path to this submodule
-                    for sub_name, sub_mod in self.model.named_modules():
-                        if sub_mod is submodule:
-                            weight_key = f"{sub_name}.weight"
-                            weight_map[weight_key] = (module, submodule)
-                            break
-            elif hasattr(module, 'encoded_exponent'):
-                # Single compressed module (Linear or Embedding)
-                weight_key = f"{name}.weight"
-                weight_map[weight_key] = (module, module)
-        
-        return weight_map
+        # List to keep track of PyTorch hooks so we can remove them later
+        self.lora_hook_handles = []
 
     def partially_unload(self, offload_device, memory_to_free=0):
         """
@@ -526,10 +438,14 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
         return 0
     
     def unpatch_hooks(self):
-        """Clear LoRA patches when unpatching."""
+        # 1. Run standard ComfyUI unpatching
         super().unpatch_hooks()
-        # Clear all registered LoRA patches for DF11 modules
-        clear_all_df11_lora_patches()
+        
+        # 2. Explicitly remove our custom LoRA hooks
+        if hasattr(self, "lora_hook_handles"):
+            for hook in self.lora_hook_handles:
+                hook.remove()
+            self.lora_hook_handles.clear()
 
     def _patch_state_dict(self, state_dict_func):
         lora_loading_functions = {"model_lora_keys_unet", "add_patches"}
@@ -569,28 +485,9 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
 
         return loading
 
-    def _register_df11_lora_patches(self):
-        """
-        Register all LoRA patches with their corresponding DF11 modules.
-        This should be called after patches are set but before the model runs.
-        """
-        # Clear any existing registrations
-        clear_all_df11_lora_patches()
-        
-        # Go through all patches and register them with DF11 modules
-        for weight_key, patch_list in self.patches.items():
-            if weight_key in self._df11_weight_to_module_map:
-                df11_module, submodule = self._df11_weight_to_module_map[weight_key]
-                register_lora_for_df11_module(df11_module, weight_key, patch_list, submodule)
-                logging.debug(f"Registered LoRA for DF11: {weight_key}")
-
     def load(self, device_to=None, lowvram_model_memory=0, force_patch_weights=False, full_load=False):
         with self.use_ejected():
             self.unpatch_hooks()
-            
-            # Register LoRA patches with DF11 modules BEFORE loading
-            self._register_df11_lora_patches()
-            
             mem_counter = 0
             patch_counter = 0
             lowvram_counter = 0
@@ -622,18 +519,16 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                         m.weight_function = []
                         m.bias_function = []
 
-                    # For DF11 modules, we don't use LowVramPatch - LoRA is handled in decode hook
                     if weight_key in self.patches:
-                        if weight_key not in self._df11_weight_to_module_map:
-                            # Non-DF11 weight, use standard patching
-                            if force_patch_weights:
-                                self.patch_weight_to_device(weight_key)
-                            else:
-                                _, set_func, convert_func = get_key_weight(self.model, weight_key)
-                                m.weight_function = [LowVramPatch(weight_key, self.patches, convert_func, set_func)]
-                                patch_counter += 1
-                        # DF11 weights are handled by the decode hook
-                        
+                        if force_patch_weights:
+                            self.patch_weight_to_device(weight_key)
+                            # Register Hook & Store Handle (moved here - no longer depends on bias)
+                            handle = m.register_forward_pre_hook(get_hook_lora(self.patches[weight_key], weight_key))
+                            self.lora_hook_handles.append(handle)
+                        else:
+                            _, set_func, convert_func = get_key_weight(self.model, weight_key)
+                            m.weight_function = [LowVramPatch(weight_key, self.patches, convert_func, set_func)]
+                            patch_counter += 1
                     if bias_key in self.patches:
                         if force_patch_weights:
                             self.patch_weight_to_device(bias_key)
@@ -673,8 +568,332 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                         continue
 
                 for param in params:
+                    self.patch_weight_to_device("{}.{}".format(n, param), device_to=device_to)
+                
+                # Apply LoRA Hook if patches exist for this module's weight
+                # We do this OUTSIDE the param loop to ensure it happens once per module
+                # and doesn't depend on "bias" existing.
+                weight_key = f"{n}.weight"
+                if weight_key in self.patches:
+                     handle = m.register_forward_pre_hook(get_hook_lora(self.patches[weight_key], weight_key))
+                     self.lora_hook_handles.append(handle)
+
+                logging.debug("lowvram: loaded module regularly {} {}".format(n, m))
+                m.comfy_patched_weights = True
+
+            for x in load_completely:
+                x[2].to(device_to)
+
+            if lowvram_counter > 0:
+                logging.info("loaded partially {} {} {}".format(lowvram_model_memory / (1024 * 1024), mem_counter / (1024 * 1024), patch_counter))
+                self.model.model_lowvram = True
+            else:
+                logging.info("loaded completely {} {} {}".format(lowvram_model_memory / (1024 * 1024), mem_counter / (1024 * 1024), full_load))
+                self.model.model_lowvram = False
+                if full_load:
+                    self.model.to(device_to)
+                    mem_counter = self.model_size()
+
+            self.model.lowvram_patch_counter += patch_counter
+            self.model.device = device_to
+            self.model.model_loaded_weight_memory = mem_counter
+            self.model.current_weight_patches_uuid = self.patches_uuid
+
+            for callback in self.get_all_callbacks(CallbacksMP.ON_LOAD):
+                callback(self, device_to, lowvram_model_memory, force_patch_weights, full_load)
+
+            self.apply_hooks(self.forced_hooks, force_apply=True)
+
+
+# ========================================
+# LORA-ENABLED CODE 
+# ========================================
+
+# Store for LoRA patches that need to be applied after decompression
+_module_lora_patches: Dict[int, List[Tuple[str, List, Any]]] = {}
+
+
+def register_lora_for_df11_module(module: nn.Module, weight_key: str, patch_list: List, submodule: nn.Module = None):
+    """Register LoRA patches to be applied after DFloat11 decompression."""
+    module_id = id(module)
+    if module_id not in _module_lora_patches:
+        _module_lora_patches[module_id] = []
+    _module_lora_patches[module_id].append((weight_key, patch_list, submodule or module))
+
+
+def clear_lora_for_df11_module(module: nn.Module):
+    """Clear all registered LoRA patches for a module."""
+    module_id = id(module)
+    if module_id in _module_lora_patches:
+        del _module_lora_patches[module_id]
+
+
+def clear_all_df11_lora_patches():
+    """Clear all registered LoRA patches."""
+    _module_lora_patches.clear()
+
+
+def apply_lora_to_weight(weight: torch.Tensor, weight_key: str, patch_list: List) -> torch.Tensor:
+    """Apply LoRA patches to a weight tensor."""
+    if not patch_list:
+        return weight
+    patched_weight = comfy.lora.calculate_weight(patch_list, weight, weight_key)
+    result = comfy.float.stochastic_rounding(patched_weight, weight.dtype, seed=string_to_seed(weight_key))
+    return result
+
+
+def get_hook_flux_with_lora(threads_per_block, bytes_per_thread):
+    """
+    NEW: Decode hook that supports LoRA application after decompression.
+    Use this instead of get_hook_flux_diffusers when LoRA support is needed.
+    """
+    threads_per_block = tuple(threads_per_block)
+
+    def decode_hook(module, _):
+        device = module.luts.device
+
+        # Load offloaded tensors to GPU if not already there
+        if hasattr(module, 'offloaded_tensors'):
+            for tensor_name, tensor in module.offloaded_tensors.items():
+                if not (
+                    hasattr(module, tensor_name) and (getattr(module, tensor_name).device == device)
+                ):
+                    module.register_buffer(tensor_name, tensor.to(device, non_blocking=True))
+
+        # Get dimensions for tensor reconstruction
+        n_elements = module.sign_mantissa.numel()
+        n_bytes = module.encoded_exponent.numel()
+        n_luts = module.luts.shape[0]
+
+        # Get output tensor for reconstructed weights
+        reconstructed = TensorManager.allocate_bfloat16(device, n_elements)
+
+        # Configure CUDA grid dimensions for the kernel launch
+        blocks_per_grid = (int(math.ceil(n_bytes / (threads_per_block[0] * bytes_per_thread))), )
+
+        # Launch CUDA kernel to decode the compressed weights
+        with cp.cuda.Device(device.index):
+            _decode(grid=blocks_per_grid, block=threads_per_block, shared_mem=module.shared_mem_size, args=[
+                module.luts.data_ptr(),
+                module.encoded_exponent.data_ptr(),
+                module.sign_mantissa.data_ptr(),
+                module.output_positions.data_ptr(),
+                module.gaps.data_ptr(),
+                reconstructed.data_ptr(),
+                n_luts, n_bytes, n_elements
+            ])
+
+        # Get any registered LoRA patches for this module
+        module_id = id(module)
+        lora_patches = _module_lora_patches.get(module_id, [])
+
+        # Inject reconstructed weights into the appropriate module
+        if len(module.weight_injection_modules) == 10:
+            # Should be double_block
+            reconstructed[:] = torch.cat((
+                reconstructed[0:141557760], 
+                reconstructed[160432128:169869312], 
+                reconstructed[141557760:160432128], 
+                reconstructed[169869312:]
+            ))
+            
+            weights = torch.tensor_split(reconstructed, module.split_positions)
+            
+            # Apply weights with LoRA if patches exist
+            def apply_weight_with_lora(submodule, weight_tensor, submodule_index):
+                shaped_weight = weight_tensor.view(submodule.out_features, submodule.in_features)
+                # Check if there's a LoRA patch for this submodule
+                for weight_key, patch_list, target_submodule in lora_patches:
+                    if target_submodule is submodule:
+                        shaped_weight = apply_lora_to_weight(shaped_weight, weight_key, patch_list)
+                        break
+                submodule.weight = shaped_weight
+            
+            apply_weight_with_lora(module.weight_injection_modules[0], weights[0], 0)  # img_mod.lin
+            apply_weight_with_lora(module.weight_injection_modules[1], reconstructed[113246208:141557760], 1)  # img_attn.qkv
+            apply_weight_with_lora(module.weight_injection_modules[2], weights[8], 2)  # img_attn.proj
+            apply_weight_with_lora(module.weight_injection_modules[3], weights[10], 3)  # img_mlp.0
+            apply_weight_with_lora(module.weight_injection_modules[4], weights[11], 4)  # img_mlp.2
+            apply_weight_with_lora(module.weight_injection_modules[5], weights[1], 5)  # txt_mod.lin
+            apply_weight_with_lora(module.weight_injection_modules[6], reconstructed[141557760:169869312], 6)  # txt_attn.qkv
+            apply_weight_with_lora(module.weight_injection_modules[7], weights[9], 7)  # txt_attn.proj
+            apply_weight_with_lora(module.weight_injection_modules[8], weights[12], 8)  # txt_mlp.0
+            apply_weight_with_lora(module.weight_injection_modules[9], weights[13], 9)  # txt_mlp.2
+
+        elif len(module.weight_injection_modules) == 3:
+            # Should be single_block
+            reconstructed[:] = torch.cat((
+                reconstructed[113246208:141557760], 
+                reconstructed[28311552:66060288], 
+                reconstructed[66060288:113246208], 
+                reconstructed[0:28311552]
+            ))
+            
+            weights = torch.tensor_split(reconstructed, module.split_positions)
+            
+            def apply_weight_with_lora(submodule, weight_tensor):
+                shaped_weight = weight_tensor.view(submodule.out_features if hasattr(submodule, 'out_features') else weight_tensor.shape[0], 
+                                                   submodule.in_features if hasattr(submodule, 'in_features') else weight_tensor.shape[1])
+                for weight_key, patch_list, target_submodule in lora_patches:
+                    if target_submodule is submodule:
+                        shaped_weight = apply_lora_to_weight(shaped_weight, weight_key, patch_list)
+                        break
+                submodule.weight = shaped_weight
+            
+            apply_weight_with_lora(module.weight_injection_modules[0], reconstructed[0:66060288].view(21504, 3072))  # linear1
+            apply_weight_with_lora(module.weight_injection_modules[1], weights[2])  # linear2
+            apply_weight_with_lora(module.weight_injection_modules[2], reconstructed[113246208:141557760].view(9216, 3072))  # modulation.lin
+        
+        else:
+            raise Exception(f"{len(module.weight_injection_modules)} weight_injection_modules \n{module.weight_injection_modules}")
+
+        # Delete tensors from GPU if offloading is enabled
+        if hasattr(module, 'offloaded_tensors'):
+            for tensor_name in module.offloaded_tensors.keys():
+                if hasattr(module, tensor_name):
+                    tmp = getattr(module, tensor_name)
+                    delattr(module, tensor_name)
+                    del tmp
+
+    return decode_hook
+
+
+class DFloat11ModelPatcherWithLoRA(DFloat11ModelPatcher):
+    """
+    NEW: Extended ModelPatcher that adds LoRA support for DFloat11 models.
+    
+    Use this class instead of DFloat11ModelPatcher when you need LoRA support.
+    Inherits all base functionality and adds LoRA patch registration.
+    """
+    
+    def __init__(self, model, load_device, offload_device, size=0, weight_inplace_update=False):
+        super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
+        
+        # Build mapping from weight keys to their DF11 parent modules and submodules
+        self._df11_weight_to_module_map = self._build_df11_weight_map()
+
+    def _build_df11_weight_map(self) -> Dict[str, Tuple[nn.Module, nn.Module]]:
+        """
+        Build a mapping from weight keys to (df11_parent_module, target_submodule).
+        """
+        weight_map = {}
+        
+        for name, module in self.model.named_modules():
+            if hasattr(module, 'weight_injection_modules') and hasattr(module, 'encoded_exponent'):
+                for submodule in module.weight_injection_modules:
+                    for sub_name, sub_mod in self.model.named_modules():
+                        if sub_mod is submodule:
+                            weight_key = f"{sub_name}.weight"
+                            weight_map[weight_key] = (module, submodule)
+                            break
+            elif hasattr(module, 'encoded_exponent'):
+                weight_key = f"{name}.weight"
+                weight_map[weight_key] = (module, module)
+        
+        return weight_map
+    
+    def unpatch_hooks(self):
+        """Clear LoRA patches when unpatching."""
+        super().unpatch_hooks()
+        clear_all_df11_lora_patches()
+
+    def _register_df11_lora_patches(self):
+        """Register all LoRA patches with their corresponding DF11 modules."""
+        clear_all_df11_lora_patches()
+        
+        for weight_key, patch_list in self.patches.items():
+            if weight_key in self._df11_weight_to_module_map:
+                df11_module, submodule = self._df11_weight_to_module_map[weight_key]
+                register_lora_for_df11_module(df11_module, weight_key, patch_list, submodule)
+                logging.debug(f"Registered LoRA for DF11: {weight_key}")
+
+    def load(self, device_to=None, lowvram_model_memory=0, force_patch_weights=False, full_load=False):
+        with self.use_ejected():
+            self.unpatch_hooks()
+            
+            # Register LoRA patches with DF11 modules BEFORE loading
+            self._register_df11_lora_patches()
+            
+            mem_counter = 0
+            patch_counter = 0
+            lowvram_counter = 0
+            loading = self._load_list()
+
+            load_completely = []
+            loading.sort(reverse=True)
+            for x in loading:
+                n = x[1]
+                m = x[2]
+                params = x[3]
+                module_mem = x[0]
+
+                lowvram_weight = False
+
+                weight_key = "{}.weight".format(n)
+                bias_key = "{}.bias".format(n)
+
+                if not full_load and hasattr(m, "comfy_cast_weights"):
+                    if mem_counter + module_mem >= lowvram_model_memory:
+                        lowvram_weight = True
+                        lowvram_counter += 1
+                        if hasattr(m, "prev_comfy_cast_weights"):
+                            continue
+                        
+                cast_weight = self.force_cast_weights
+                if lowvram_weight:
+                    if hasattr(m, "comfy_cast_weights"):
+                        m.weight_function = []
+                        m.bias_function = []
+
+                    if weight_key in self.patches:
+                        if weight_key not in self._df11_weight_to_module_map:
+                            if force_patch_weights:
+                                self.patch_weight_to_device(weight_key)
+                            else:
+                                _, set_func, convert_func = get_key_weight(self.model, weight_key)
+                                m.weight_function = [LowVramPatch(weight_key, self.patches, convert_func, set_func)]
+                                patch_counter += 1
+                        
+                    if bias_key in self.patches:
+                        if force_patch_weights:
+                            self.patch_weight_to_device(bias_key)
+                        else:
+                            _, set_func, convert_func = get_key_weight(self.model, bias_key)
+                            m.bias_function = [LowVramPatch(bias_key, self.patches, convert_func, set_func)]
+                            patch_counter += 1
+
+                    cast_weight = True
+                else:
+                    if hasattr(m, "comfy_cast_weights"):
+                        wipe_lowvram_weight(m)
+
+                    if full_load or mem_counter + module_mem < lowvram_model_memory:
+                        mem_counter += module_mem
+                        load_completely.append((module_mem, n, m, params))
+
+                if cast_weight and hasattr(m, "comfy_cast_weights"):
+                    m.prev_comfy_cast_weights = m.comfy_cast_weights
+                    m.comfy_cast_weights = True
+
+                if weight_key in self.weight_wrapper_patches:
+                    m.weight_function.extend(self.weight_wrapper_patches[weight_key])
+
+                if bias_key in self.weight_wrapper_patches:
+                    m.bias_function.extend(self.weight_wrapper_patches[bias_key])
+
+                mem_counter += move_weight_functions(m, device_to)
+
+            load_completely.sort(reverse=True)
+            for x in load_completely:
+                n = x[1]
+                m = x[2]
+                params = x[3]
+                if hasattr(m, "comfy_patched_weights"):
+                    if m.comfy_patched_weights == True:
+                        continue
+
+                for param in params:
                     param_key = "{}.{}".format(n, param)
-                    # Skip DF11 weights - they're handled by decode hook
                     if param_key not in self._df11_weight_to_module_map:
                         self.patch_weight_to_device(param_key, device_to=device_to)
 
