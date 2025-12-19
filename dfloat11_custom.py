@@ -383,8 +383,6 @@ class DFloat11FluxDiffusersModel(DFloat11Model):
 
         return model
 
-import comfy
-import torch
 import logging
 import inspect
 from comfy.model_patcher import LowVramPatch, move_weight_functions, wipe_lowvram_weight, get_key_weight, string_to_seed
