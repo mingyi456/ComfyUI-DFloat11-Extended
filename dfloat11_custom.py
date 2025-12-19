@@ -383,64 +383,22 @@ class DFloat11FluxDiffusersModel(DFloat11Model):
 
         return model
 
+import comfy
+import torch
 import logging
 import inspect
-
-from comfy.model_patcher import LowVramPatch
-from comfy.model_patcher import get_key_weight, wipe_lowvram_weight, move_weight_functions, string_to_seed
+from comfy.model_patcher import LowVramPatch, move_weight_functions, wipe_lowvram_weight, get_key_weight, string_to_seed
 from comfy.patcher_extension import CallbacksMP
-
-from .state_dict_shapes import chroma_keys_dict, flux_keys_dict, zimage_keys_dict
-
-def patch_state_dict_zimage(state_dict_func):
-    lora_loading_functions = {"model_lora_keys_unet", "add_patches"}
-    
-    # We assume ComfyUI prefixes keys with "diffusion_model."
-    fake_state_dict = {f"diffusion_model.{key}" : None for key in zimage_keys_dict}
-    
-    def new_state_dict_func():
-        call_stack = inspect.stack()
-        caller_function = call_stack[1].function
-        del call_stack
-        if caller_function in lora_loading_functions:
-            return fake_state_dict
-
-        return state_dict_func()
-    return new_state_dict_func
-
-def df11_module_size(module):
-    module_mem = 0
-    sd = module.state_dict()
-    for k in sd:
-        t = sd[k]
-        module_mem += t.nelement() * t.element_size()
-    if hasattr(module, "encoded_exponent"):
-        module_mem += module.encoded_exponent.nelement()
-        module_mem += module.sign_mantissa.nelement()
-        
-    return module_mem
-
-def patch_state_dict(state_dict_func):
-    lora_loading_functions = {"model_lora_keys_unet", "add_patches"}
-    
-    fake_state_dict = {f"diffusion_model.{key}" : None for key in chroma_keys_dict}
-    def new_state_dict_func():
-        call_stack = inspect.stack()
-        caller_function = call_stack[1].function
-        del call_stack
-        if caller_function in lora_loading_functions:
-            return fake_state_dict
-
-        return state_dict_func()
-    return new_state_dict_func
-
 
 def get_hook_lora(patch_list, key):
     def lora_hook(module, input):
+        # Calculate the new weight from patches
         new_weight = comfy.lora.calculate_weight(patch_list, module.weight, key)
+        # Apply stochastic rounding and OVERWRITE module.weight
+        # This is safe in DFloat11 ONLY if the decode hook runs before this 
+        # and regenerates the tensor fresh every pass.
         module.weight = comfy.float.stochastic_rounding(new_weight, module.weight.dtype, seed=string_to_seed(key))
     return lora_hook
-
 
 class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
     """
@@ -451,10 +409,13 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
     This class MUST be used for all DFloat11 models because the standard ModelPatcher
     will fail when trying to access .weight on compressed layers.
     """
-    
+
     def __init__(self, model, load_device, offload_device, size=0, weight_inplace_update=False):
         super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
-    
+        self.model.state_dict = self._patch_state_dict(self.model.state_dict)
+        # List to keep track of PyTorch hooks so we can remove them later
+        self.lora_hook_handles = []
+
     def partially_unload(self, offload_device, memory_to_free=0):
         """
         DFloat11 compressed modules don't have a standard '.weight' attribute - 
@@ -466,6 +427,35 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
         compressed tensor structure.
         """
         return 0
+    
+    def unpatch_hooks(self):
+        # 1. Run standard ComfyUI unpatching
+        super().unpatch_hooks()
+        
+        # 2. Explicitly remove our custom LoRA hooks
+        if hasattr(self, "lora_hook_handles"):
+            for hook in self.lora_hook_handles:
+                hook.remove()
+            self.lora_hook_handles.clear()
+
+    def _patch_state_dict(self, state_dict_func):
+        lora_loading_functions = {"model_lora_keys_unet", "add_patches"}
+        from . import state_dict_shapes
+        all_keys = set()
+        for name in state_dict_shapes.__all__:
+            keys_dict = getattr(state_dict_shapes, name)
+            all_keys.update(keys_dict.keys())
+        
+        fake_state_dict = {f"diffusion_model.{key}": None for key in all_keys}
+        
+        def new_state_dict_func():
+            call_stack = inspect.stack()
+            caller_function = call_stack[1].function
+            del call_stack
+            if caller_function in lora_loading_functions:
+                return fake_state_dict
+            return state_dict_func()
+        return new_state_dict_func
 
     def _load_list(self):
         loading = []
@@ -476,16 +466,17 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                 params.append(name)
             for name, param in module.named_parameters(recurse=True):
                 if name not in params:
-                    skip = True # skip random weights in non leaf modules
+                    skip = True # skip random weights in non leaf modules 
                     break
             if not skip and (hasattr(module, "comfy_cast_weights") or len(params) > 0):
                 loading.append((comfy.model_management.module_size(module), n, module, params))
-                
         return loading
 
     def load(self, device_to=None, lowvram_model_memory=0, force_patch_weights=False, full_load=False):
         with self.use_ejected():
+            # This calls our overridden unpatch_hooks, clearing old LoRAs
             self.unpatch_hooks()
+            
             mem_counter = 0
             patch_counter = 0
             lowvram_counter = 0
@@ -493,6 +484,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
 
             load_completely = []
             loading.sort(reverse=True)
+            
             for x in loading:
                 n = x[1]
                 m = x[2]
@@ -512,6 +504,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                             continue
 
                 cast_weight = self.force_cast_weights
+                
                 if lowvram_weight:
                     if hasattr(m, "comfy_cast_weights"):
                         m.weight_function = []
@@ -524,10 +517,13 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                             _, set_func, convert_func = get_key_weight(self.model, weight_key)
                             m.weight_function = [LowVramPatch(weight_key, self.patches, convert_func, set_func)]
                             patch_counter += 1
+                    
                     if bias_key in self.patches:
                         if force_patch_weights:
                             self.patch_weight_to_device(bias_key)
-                            m.register_forward_pre_hook(get_hook_lora(self.patches[weight_key], weight_key))
+                            # Register Hook & Store Handle
+                            handle = m.register_forward_pre_hook(get_hook_lora(self.patches[weight_key], weight_key))
+                            self.lora_hook_handles.append(handle)
                         else:
                             _, set_func, convert_func = get_key_weight(self.model, bias_key)
                             m.bias_function = [LowVramPatch(bias_key, self.patches, convert_func, set_func)]
@@ -548,26 +544,32 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
 
                 if weight_key in self.weight_wrapper_patches:
                     m.weight_function.extend(self.weight_wrapper_patches[weight_key])
-
                 if bias_key in self.weight_wrapper_patches:
                     m.bias_function.extend(self.weight_wrapper_patches[bias_key])
 
                 mem_counter += move_weight_functions(m, device_to)
 
             load_completely.sort(reverse=True)
+            
             for x in load_completely:
                 n = x[1]
                 m = x[2]
                 params = x[3] # ['weight', 'bias']
+                
                 if hasattr(m, "comfy_patched_weights"):
                     if m.comfy_patched_weights == True:
                         continue
 
                 for param in params:
                     self.patch_weight_to_device("{}.{}".format(n, param), device_to=device_to)
-                    weight_key = f"{n}.weight"
-                    if param == "bias" and weight_key in self.patches:
-                        m.register_forward_pre_hook(get_hook_lora(self.patches[weight_key], weight_key))
+                
+                # Apply LoRA Hook if patches exist for this module's weight
+                # We do this OUTSIDE the param loop to ensure it happens once per module
+                # and doesn't depend on "bias" existing.
+                weight_key = f"{n}.weight"
+                if weight_key in self.patches:
+                     handle = m.register_forward_pre_hook(get_hook_lora(self.patches[weight_key], weight_key))
+                     self.lora_hook_handles.append(handle)
 
                 logging.debug("lowvram: loaded module regularly {} {}".format(n, m))
                 m.comfy_patched_weights = True
@@ -594,30 +596,3 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                 callback(self, device_to, lowvram_model_memory, force_patch_weights, full_load)
 
             self.apply_hooks(self.forced_hooks, force_apply=True)
-
-
-class CustomChromaModelPatcher(DFloat11ModelPatcher):
-    """
-    ModelPatcher specifically for Chroma models with DFloat11 compression.
-    Adds Chroma-specific state_dict patching for LoRA compatibility.
-    
-    This is an experimental class that enables LoRA loading for Chroma models
-    by providing a fake state_dict that matches the expected Chroma key structure.
-    """
-    
-    def __init__(self, model, load_device, offload_device, size=0, weight_inplace_update=False):
-        super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
-        # Chroma-specific: patch state_dict for LoRA loading
-        self.model.state_dict = patch_state_dict(self.model.state_dict)
-
-
-class CustomZImageModelPatcher(DFloat11ModelPatcher):
-    """
-    ModelPatcher specifically for ZImage models with DFloat11 compression.
-    """
-    def __init__(self, model, load_device, offload_device, size=0, weight_inplace_update=False):
-        super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
-        # Override state_dict to serve the fake keys for LoRA loading
-        self.model.state_dict = patch_state_dict_zimage(self.model.state_dict)
-
-
