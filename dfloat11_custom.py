@@ -597,7 +597,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
             
         # TODO: Refine fake_state_dict to return only model-specific keys instead of all keys
         # from Chroma, Flux, and Z Image. Current approach has significant key overlap between
-        # model types (e.g., Flux.1-dev vs Flux.1-schnell) which could cause issues.  
+        # model types (e.g., Flux.1-dev vs Flux.1-schnell) which could cause issues.
         fake_state_dict = {f"diffusion_model.{key}": None for key in all_keys}
         
         def new_state_dict_func():
@@ -618,7 +618,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                 params.append(name)
             for name, param in module.named_parameters(recurse=True):
                 if name not in params:
-                    skip = True
+                    skip = True # skip random weights in non leaf modules
                     break
             if not skip and (hasattr(module, "comfy_cast_weights") or len(params) > 0):
                 loading.append((comfy.model_management.module_size(module), n, module, params))
@@ -669,7 +669,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                     if mem_counter + module_mem >= lowvram_model_memory:
                         lowvram_weight = True
                         lowvram_counter += 1
-                        if hasattr(m, "prev_comfy_cast_weights"):
+                        if hasattr(m, "prev_comfy_cast_weights"): #Already lowvramed
                             continue
                         
                 cast_weight = self.force_cast_weights
@@ -723,7 +723,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
             for x in load_completely:
                 n = x[1]
                 m = x[2]
-                params = x[3]
+                params = x[3] # ['weight', 'bias']
                 if hasattr(m, "comfy_patched_weights"):
                     if m.comfy_patched_weights == True:
                         continue
