@@ -243,6 +243,7 @@ def get_hook_flux_diffusers(threads_per_block, bytes_per_thread):
         
         else:
             raise Exception(f"{len(module.weight_injection_modules)} weight_injection_modules \n{module.weight_injection_modules}")
+        
 
         # Delete tensors from GPU if offloading is enabled
         if hasattr(module, 'offloaded_tensors'):
@@ -368,6 +369,7 @@ def load_and_replace_tensors_flux_diffusers(
                                     for attr_path in attr_names:
                                         parts = attr_path.split('.')
                                         target = module
+                                        # print(parts)
                                         for p in parts:
                                             target = getattr(target, p)
 
