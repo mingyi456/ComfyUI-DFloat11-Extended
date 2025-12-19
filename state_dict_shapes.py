@@ -1883,3 +1883,5 @@ zimage_keys_dict = {
     "x_embedder.bias" : torch.Size([3840]),
     "x_embedder.weight" : torch.Size([3840, 64]),
 }
+
+__all__ = ["chroma_keys_dict", "flux_keys_dict", "zimage_keys_dict"]
