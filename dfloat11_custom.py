@@ -2,7 +2,8 @@ import comfy
 import folder_paths
 import torch
 import torch.nn as nn
-
+import logging
+import inspect
 import os
 
 import cupy as cp
@@ -30,11 +31,11 @@ from dfloat11.dfloat11 import version, threads_per_block, bytes_per_thread
 
 from dfloat11.dfloat11_utils import get_codec, get_32bit_codec, get_luts, encode_weights
 
-from .convert_fixed_tensors import convert_diffusers_to_comfyui_flux
-
 ptx_path = pkg_resources.resource_filename("dfloat11", "decode.ptx")
 _decode = cp.RawModule(path=ptx_path).get_function('decode')
 
+from comfy.model_patcher import LowVramPatch, move_weight_functions, wipe_lowvram_weight, get_key_weight, string_to_seed
+from comfy.patcher_extension import CallbacksMP
 
 def get_hook_flux_diffusers(threads_per_block, bytes_per_thread):
     """
@@ -266,7 +267,6 @@ def load_and_replace_tensors_flux_diffusers(
     
     return model
 
-
     
 class DFloat11FluxDiffusersModel(DFloat11Model):
     def __init__(self):
@@ -383,16 +383,54 @@ class DFloat11FluxDiffusersModel(DFloat11Model):
 
         return model
 
-import logging
-import inspect
-from comfy.model_patcher import LowVramPatch, move_weight_functions, wipe_lowvram_weight, get_key_weight, string_to_seed
-from comfy.patcher_extension import CallbacksMP
+class CastBufferManager:
+    """Manages a reusable float16 buffer for dtype conversion - mirrors TensorManager pattern"""
+    _tensors = {}
+
+    @staticmethod
+    def get_float16_buffer(device, n_elements):
+        if isinstance(device, str):
+            device = torch.device(device)
+        
+        if device in CastBufferManager._tensors:
+            existing = CastBufferManager._tensors[device]
+            if existing.numel() >= n_elements:
+                return existing[:n_elements]
+            del CastBufferManager._tensors[device]
+            torch.cuda.empty_cache()
+        
+        new_tensor = torch.empty(n_elements, dtype=torch.float16, device=device)
+        CastBufferManager._tensors[device] = new_tensor
+        return new_tensor
+
 
 def get_hook_lora(patch_list, key):
+    print(f"[HOOK SETUP] Creating LoRA hook for key: {key} with {len(patch_list)} patches")
+    
     def lora_hook(module, input):
-        new_weight = comfy.lora.calculate_weight(patch_list, module.weight, key)
-        module.weight = comfy.float.stochastic_rounding(new_weight, module.weight.dtype, seed=string_to_seed(key))
+        weight = module.weight  # bfloat16 view into TensorManager buffer
+        original_shape = weight.shape
+        n_elements = weight.numel()
+        
+        # Get reusable fp16 buffer
+        fp16_buffer = CastBufferManager.get_float16_buffer(weight.device, n_elements)
+        fp16_buffer.copy_(weight.view(-1))
+        temp_weight = fp16_buffer.view(original_shape)
+        
+        # Calculate LoRA - this creates a new tensor (unavoidable)
+        try:
+            new_weight = comfy.lora.calculate_weight(patch_list, temp_weight, key)
+        except Exception as e:
+            print(f"[LORA HOOK ERROR] Failed to calculate weight for {key}: {e}")
+            raise e
+        
+        # Copy directly back into the ORIGINAL DFloat11 buffer (in-place)
+        weight.view(-1).copy_(new_weight.view(-1).to(torch.bfloat16))
+        
+        del new_weight  # Free immediately
+            
     return lora_hook
+
 
 def df11_module_size(module):
     module_mem = 0
@@ -408,63 +446,128 @@ def df11_module_size(module):
 
 
 class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
-    """
-    Base ModelPatcher for all DFloat11 compressed models.
-    Handles the generic DFloat11 weight format that removes the 'weight' attribute
-    from compressed layers and uses custom decompression hooks.
-    
-    This class MUST be used for all DFloat11 models because the standard ModelPatcher
-    will fail when trying to access .weight on compressed layers.
-    """
     def __init__(self, model, load_device, offload_device, size=0, weight_inplace_update=False):
         super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
-
+        
         self.model.state_dict = self._patch_state_dict(self.model.state_dict)
-        # List to keep track of PyTorch hooks so we can remove them later
         self.lora_hook_handles = []
+        self._last_patch_keys = None
 
     def partially_unload(self, offload_device, memory_to_free=0):
-        """
-        DFloat11 compressed modules don't have a standard '.weight' attribute - 
-        it's replaced with compressed tensors (encoded_exponent, sign_mantissa, etc.).
-        ComfyUI's partial unloading mechanism uses get_key_weight() which fails
-        on these modules, causing type comparison errors.
-        
-        TODO: Implement proper partial unloading that understands DFloat11's
-        compressed tensor structure.
-        """
         return 0
-    
+
     def unpatch_hooks(self):
-        # 1. Run standard ComfyUI unpatching
+        print(f"[DF11 UNPATCH] unpatch_hooks called. Keeping {len(self.lora_hook_handles)} LoRA handles")
         super().unpatch_hooks()
-        
-        # 2. Explicitly remove our custom LoRA hooks
+
+    def _check_weights_dirty(self):
+        """Check if any module has weights modified by LoRA"""
+        for n, m in self.model.named_modules():
+            if getattr(m, '_df11_lora_modified', False):
+                print(f"[DF11 CHECK] Found dirty module: {n}")
+                return True
+        return False
+
+    def _mark_weights_dirty(self):
+        """Mark modules as having LoRA-modified weights"""
+        count = 0
+        for n, m in self.model.named_modules():
+            if hasattr(m, 'weight'):
+                m._df11_lora_modified = True
+                count += 1
+        print(f"[DF11] Marked {count} modules as LoRA-modified")
+
+    def _clear_lora_hooks(self):
+        """Remove all LoRA hooks from modules"""
+        # First, remove hooks we have handles for
         if hasattr(self, "lora_hook_handles"):
             for hook in self.lora_hook_handles:
                 hook.remove()
             self.lora_hook_handles.clear()
+        
+        # CRITICAL: Also scan all modules and remove any lingering lora_hook functions
+        # This catches hooks that persist when patcher instance is recreated
+        removed_count = 0
+        for n, m in self.model.named_modules():
+            if hasattr(m, '_forward_pre_hooks'):
+                hooks_to_remove = []
+                for hook_id, hook_fn in m._forward_pre_hooks.items():
+                    # Check if this is a lora_hook by checking the function name
+                    if hasattr(hook_fn, '__name__') and 'lora_hook' in hook_fn.__name__:
+                        hooks_to_remove.append(hook_id)
+                    elif hasattr(hook_fn, '__qualname__') and 'lora_hook' in hook_fn.__qualname__:
+                        hooks_to_remove.append(hook_id)
+                
+                for hook_id in hooks_to_remove:
+                    del m._forward_pre_hooks[hook_id]
+                    removed_count += 1
+        
+        print(f"[DF11] LoRA hooks cleared (handles: {len(self.lora_hook_handles) if hasattr(self, 'lora_hook_handles') else 0}, removed from modules: {removed_count})")
+
+    def _reset_weights_to_base(self, device_to=None):
+        """Force re-decode from DFloat11 by clearing TensorManager cache"""
+        reset_count = 0
+        dirty_found = 0
+        
+        # Count dirty modules
+        dirty_modules = []
+        for n, m in self.model.named_modules():
+            if getattr(m, '_df11_lora_modified', False):
+                dirty_modules.append((n, m))
+                dirty_found += 1
+        
+        if dirty_found == 0:
+            print("[DF11] No dirty modules found")
+            return
+        
+        print(f"[DF11] Found {dirty_found} dirty modules, forcing TensorManager re-decode...")
+        
+        # Clear TensorManager's cached tensors
+        # This is the key - the weights are views into this buffer
+        if hasattr(TensorManager, '_tensors') and TensorManager._tensors:
+            # Get the device we need to clear
+            target_device = device_to if device_to else torch.device('cuda:0')
+            if target_device in TensorManager._tensors:
+                # Delete the cached tensor for this device
+                del TensorManager._tensors[target_device]
+                print(f"[DF11] Cleared TensorManager cache for {target_device}")
+            
+            torch.cuda.empty_cache()
+        
+        # Clear dirty flags and comfy_patched_weights to force re-load
+        for n, m in dirty_modules:
+            m._df11_lora_modified = False
+            if hasattr(m, 'comfy_patched_weights'):
+                m.comfy_patched_weights = False
+            reset_count += 1
+        
+        # Also clear comfy_patched_weights on ALL modules to force full reload
+        for n, m in self.model.named_modules():
+            if hasattr(m, 'comfy_patched_weights'):
+                m.comfy_patched_weights = False
+        
+        print(f"[DF11] Reset {reset_count} modules, cleared TensorManager cache")
 
     def _patch_state_dict(self, state_dict_func):
-        lora_loading_functions = {"model_lora_keys_unet", "add_patches"}
+        lora_loading_functions = {"model_lora_keys_unet", "add_patches"} 
         from . import state_dict_shapes
         all_keys = set()
         for name in state_dict_shapes.__all__:
             keys_dict = getattr(state_dict_shapes, name)
             all_keys.update(keys_dict.keys())
             
-        # TODO: Refine fake_state_dict to return only model-specific keys instead of all keys
-        # from Chroma, Flux, and Z Image. Current approach has significant key overlap between
-        # model types (e.g., Flux.1-dev vs Flux.1-schnell) which could cause issues.
         fake_state_dict = {f"diffusion_model.{key}": None for key in all_keys}
         
         def new_state_dict_func():
             call_stack = inspect.stack()
             caller_function = call_stack[1].function
             del call_stack
+            
             if caller_function in lora_loading_functions:
                 return fake_state_dict
+            
             return state_dict_func()
+        
         return new_state_dict_func
 
     def _load_list(self):
@@ -476,7 +579,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                 params.append(name)
             for name, param in module.named_parameters(recurse=True):
                 if name not in params:
-                    skip = True # skip random weights in non leaf modules
+                    skip = True 
                     break
             if not skip and (hasattr(module, "comfy_cast_weights") or len(params) > 0):
                 loading.append((comfy.model_management.module_size(module), n, module, params))
@@ -484,8 +587,38 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
         return loading
 
     def load(self, device_to=None, lowvram_model_memory=0, force_patch_weights=False, full_load=False):
+        print(f"[DF11 LOAD] Starting load... Device: {device_to}, Full: {full_load}")
+        
+        # Get current patch keys
+        current_patch_keys = frozenset(self.patches.keys())
+        has_lora = len(current_patch_keys) > 0
+        
+        # Check ACTUAL state from the model, not instance variables
+        weights_are_dirty = self._check_weights_dirty()
+        
+        print(f"[DF11 LOAD] Patch keys: {len(self._last_patch_keys) if self._last_patch_keys else 'None'} -> {len(current_patch_keys)}")
+        print(f"[DF11 LOAD] has_lora={has_lora}, weights_are_dirty={weights_are_dirty}")
+        
+        # CRITICAL: If no LoRA requested but weights are dirty, we MUST reset
+        if not has_lora and weights_are_dirty:
+            print(f"[DF11 LOAD] *** NO LORA BUT WEIGHTS DIRTY - RESETTING TO BASE ***")
+            self._clear_lora_hooks()
+            self._reset_weights_to_base(device_to)
+        # If LoRA changed, also reset
+        elif has_lora and self._last_patch_keys is not None and current_patch_keys != self._last_patch_keys:
+            print(f"[DF11 LOAD] *** LORA CHANGED - RESETTING TO BASE ***")
+            self._clear_lora_hooks()
+            if weights_are_dirty:
+                self._reset_weights_to_base(device_to)
+        
+        # Update tracking
+        self._last_patch_keys = current_patch_keys
+        
+        need_new_hooks = has_lora and len(self.lora_hook_handles) == 0
+
         with self.use_ejected():
-            self.unpatch_hooks()
+            super().unpatch_hooks()
+
             mem_counter = 0
             patch_counter = 0
             lowvram_counter = 0
@@ -493,6 +626,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
 
             load_completely = []
             loading.sort(reverse=True)
+            
             for x in loading:
                 n = x[1]
                 m = x[2]
@@ -500,7 +634,6 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                 module_mem = x[0]
 
                 lowvram_weight = False
-
                 weight_key = "{}.weight".format(n)
                 bias_key = "{}.bias".format(n)
 
@@ -508,7 +641,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                     if mem_counter + module_mem >= lowvram_model_memory:
                         lowvram_weight = True
                         lowvram_counter += 1
-                        if hasattr(m, "prev_comfy_cast_weights"): #Already lowvramed
+                        if hasattr(m, "prev_comfy_cast_weights"): 
                             continue
                         
                 cast_weight = self.force_cast_weights
@@ -520,9 +653,10 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                     if weight_key in self.patches:
                         if force_patch_weights:
                             self.patch_weight_to_device(weight_key)
-                            # Register Hook & Store Handle (moved here - no longer depends on bias)
-                            handle = m.register_forward_pre_hook(get_hook_lora(self.patches[weight_key], weight_key))
-                            self.lora_hook_handles.append(handle)
+                            if need_new_hooks:
+                                print(f"[DF11 LOAD] LowVRAM: Registering LoRA hook for {weight_key}")
+                                handle = m.register_forward_pre_hook(get_hook_lora(self.patches[weight_key], weight_key))
+                                self.lora_hook_handles.append(handle)
                         else:
                             _, set_func, convert_func = get_key_weight(self.model, weight_key)
                             m.weight_function = [LowVramPatch(weight_key, self.patches, convert_func, set_func)]
@@ -560,28 +694,33 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
             for x in load_completely:
                 n = x[1]
                 m = x[2]
-                params = x[3] # ['weight', 'bias']
-                if hasattr(m, "comfy_patched_weights"):
-                    if m.comfy_patched_weights == True:
-                        continue
-
-                for param in params:
-                    self.patch_weight_to_device("{}.{}".format(n, param), device_to=device_to)
+                params = x[3]
                 
-                # Apply LoRA Hook if patches exist for this module's weight
-                # We do this OUTSIDE the param loop to ensure it happens once per module
-                # and doesn't depend on "bias" existing.
-                weight_key = f"{n}.weight"
-                if weight_key in self.patches:
-                     handle = m.register_forward_pre_hook(get_hook_lora(self.patches[weight_key], weight_key))
-                     self.lora_hook_handles.append(handle)
+                weights_already_loaded = hasattr(m, "comfy_patched_weights") and m.comfy_patched_weights == True
 
-                logging.debug("lowvram: loaded module regularly {} {}".format(n, m))
+                # Load/decode weights from DFloat11
+                if not weights_already_loaded:
+                    for param in params:
+                        self.patch_weight_to_device("{}.{}".format(n, param), device_to=device_to)
+                
+                # Register hooks ONLY if we need new hooks AND this key has patches
+                weight_key = f"{n}.weight"
+                if weight_key in self.patches and need_new_hooks:
+                    print(f"[DF11 LOAD] Registering LoRA hook for {weight_key}")
+                    handle = m.register_forward_pre_hook(get_hook_lora(self.patches[weight_key], weight_key))
+                    self.lora_hook_handles.append(handle)
+                
                 m.comfy_patched_weights = True
 
             for x in load_completely:
                 x[2].to(device_to)
 
+            # Mark that we now have hooks that will modify weights
+            if len(self.lora_hook_handles) > 0:
+                self._mark_weights_dirty()
+                
+            print(f"[DF11 LOAD] Total LoRA hooks: {len(self.lora_hook_handles)}, weights_dirty: {self._check_weights_dirty()}")
+            
             if lowvram_counter > 0:
                 logging.info("loaded partially {} {} {}".format(lowvram_model_memory / (1024 * 1024), mem_counter / (1024 * 1024), patch_counter))
                 self.model.model_lowvram = True
