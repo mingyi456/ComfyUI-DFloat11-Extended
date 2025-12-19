@@ -3,8 +3,6 @@ import folder_paths
 import torch
 import torch.nn as nn
 
-import logging
-import inspect
 import os
 
 import cupy as cp
@@ -32,11 +30,11 @@ from dfloat11.dfloat11 import version, threads_per_block, bytes_per_thread
 
 from dfloat11.dfloat11_utils import get_codec, get_32bit_codec, get_luts, encode_weights
 
+from .convert_fixed_tensors import convert_diffusers_to_comfyui_flux
+
 ptx_path = pkg_resources.resource_filename("dfloat11", "decode.ptx")
 _decode = cp.RawModule(path=ptx_path).get_function('decode')
 
-from comfy.model_patcher import LowVramPatch, move_weight_functions, wipe_lowvram_weight, get_key_weight, string_to_seed
-from comfy.patcher_extension import CallbacksMP
 
 def get_hook_flux_diffusers(threads_per_block, bytes_per_thread):
     """
@@ -384,7 +382,11 @@ class DFloat11FluxDiffusersModel(DFloat11Model):
                 print("Warning: Some model layers are on CPU. For inference, ensure the model is fully loaded onto CUDA-compatible GPUs.", file=stderr)
 
         return model
-
+    
+import logging
+import inspect
+from comfy.model_patcher import LowVramPatch, move_weight_functions, wipe_lowvram_weight, get_key_weight, string_to_seed
+from comfy.patcher_extension import CallbacksMP
 class CastBufferManager:
     """Manages a reusable float16 buffer for dtype conversion - mirrors TensorManager pattern"""
     _tensors = {}
@@ -430,7 +432,6 @@ def get_hook_lora(patch_list, key):
         del new_weight  # Free immediately
             
     return lora_hook
-
 
 def df11_module_size(module):
     module_mem = 0
