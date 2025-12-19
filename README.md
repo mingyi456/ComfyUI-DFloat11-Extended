@@ -12,7 +12,8 @@
 <b>Currently supported features:
 - Compatibility node for loading `diffusers`-native Flux DF11 models (using the "DFloat11 diffusers-native Model Loader" node)
 - Cpu offloading options (available under the "DFloat11 Model Loader (Advanced)" node)
-- Experimental LoRA support for Chroma (currently fixed for now, still in experimental stage)</b>
+- Experimental LoRA support for Chroma, Flux and Z Image (still in experimental stage)
+- Compression node for compressing BF16 models into DFloat11 format (for all supported model architectures)</b>
 
 Thanks to @tonyzhang617 for implementing the base DF11 compression and inference code. Unfortunately, it seems that the original developer is rather sporadic in his efforts to maintain the codebase and add features, so I decided to fork the repo and attempt to support it myself. 
 
