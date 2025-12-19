@@ -446,14 +446,32 @@ def df11_module_size(module):
 
 
 class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
+    """
+    Base ModelPatcher for all DFloat11 compressed models.
+    Handles the generic DFloat11 weight format that removes the 'weight' attribute
+    from compressed layers and uses custom decompression hooks.
+    
+    This class MUST be used for all DFloat11 models because the standard ModelPatcher
+    will fail when trying to access .weight on compressed layers.
+    """
     def __init__(self, model, load_device, offload_device, size=0, weight_inplace_update=False):
         super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
         
         self.model.state_dict = self._patch_state_dict(self.model.state_dict)
+        # List to keep track of PyTorch hooks so we can remove them later
         self.lora_hook_handles = []
         self._last_patch_keys = None
 
     def partially_unload(self, offload_device, memory_to_free=0):
+        """
+        DFloat11 compressed modules don't have a standard '.weight' attribute - 
+        it's replaced with compressed tensors (encoded_exponent, sign_mantissa, etc.).
+        ComfyUI's partial unloading mechanism uses get_key_weight() which fails
+        on these modules, causing type comparison errors.
+        
+        TODO: Implement proper partial unloading that understands DFloat11's
+        compressed tensor structure.
+        """
         return 0
 
     def unpatch_hooks(self):
@@ -555,7 +573,10 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
         for name in state_dict_shapes.__all__:
             keys_dict = getattr(state_dict_shapes, name)
             all_keys.update(keys_dict.keys())
-            
+        
+        # TODO: Refine fake_state_dict to return only model-specific keys instead of all keys
+        # from Chroma, Flux, and Z Image. Current approach has significant key overlap between
+        # model types (e.g., Flux.1-dev vs Flux.1-schnell) which could cause issues.
         fake_state_dict = {f"diffusion_model.{key}": None for key in all_keys}
         
         def new_state_dict_func():
@@ -579,7 +600,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                 params.append(name)
             for name, param in module.named_parameters(recurse=True):
                 if name not in params:
-                    skip = True 
+                    skip = True # skip random weights in non leaf modules 
                     break
             if not skip and (hasattr(module, "comfy_cast_weights") or len(params) > 0):
                 loading.append((comfy.model_management.module_size(module), n, module, params))
@@ -641,7 +662,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                     if mem_counter + module_mem >= lowvram_model_memory:
                         lowvram_weight = True
                         lowvram_counter += 1
-                        if hasattr(m, "prev_comfy_cast_weights"): 
+                        if hasattr(m, "prev_comfy_cast_weights"): #Already lowvramed 
                             continue
                         
                 cast_weight = self.force_cast_weights
