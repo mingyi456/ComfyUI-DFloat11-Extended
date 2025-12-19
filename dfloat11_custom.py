@@ -517,6 +517,9 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                     if weight_key in self.patches:
                         if force_patch_weights:
                             self.patch_weight_to_device(weight_key)
+                            # Register Hook & Store Handle (moved here - no longer depends on bias)
+                            handle = m.register_forward_pre_hook(get_hook_lora(self.patches[weight_key], weight_key))
+                            self.lora_hook_handles.append(handle)
                         else:
                             _, set_func, convert_func = get_key_weight(self.model, weight_key)
                             m.weight_function = [LowVramPatch(weight_key, self.patches, convert_func, set_func)]
@@ -524,9 +527,6 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                     if bias_key in self.patches:
                         if force_patch_weights:
                             self.patch_weight_to_device(bias_key)
-                            # Register Hook & Store Handle
-                            handle = m.register_forward_pre_hook(get_hook_lora(self.patches[weight_key], weight_key))
-                            self.lora_hook_handles.append(handle)
                         else:
                             _, set_func, convert_func = get_key_weight(self.model, bias_key)
                             m.bias_function = [LowVramPatch(bias_key, self.patches, convert_func, set_func)]
