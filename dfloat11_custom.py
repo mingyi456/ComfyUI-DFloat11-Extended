@@ -447,6 +447,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
     Base ModelPatcher for all DFloat11 compressed models.
     Handles the generic DFloat11 weight format that removes the 'weight' attribute
     from compressed layers and uses custom decompression hooks.
+    
     This class MUST be used for all DFloat11 models because the standard ModelPatcher
     will fail when trying to access .weight on compressed layers.
     """
