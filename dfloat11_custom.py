@@ -37,21 +37,18 @@ def get_hook_lora(patch_list, key):
         n_elements = weight.numel()
         
         # Get reusable fp16 buffer
-        fp16_buffer = CastBufferManager.get_float16_buffer(weight.device, n_elements)
-        fp16_buffer.copy_(weight.view(-1))
-        temp_weight = fp16_buffer.view(original_shape)
+        fp16_buffer = CastBufferManager.get_float16_buffer(weight.device, n_elements).view(original_shape)
+        fp16_buffer.copy_(weight)
         
         # Calculate LoRA - this creates a new tensor (unavoidable)
         try:
-            new_weight = comfy.lora.calculate_weight(patch_list, temp_weight, key)
+            comfy.lora.calculate_weight(patch_list, fp16_buffer, key)
         except Exception as e:
             print(f"[LORA HOOK ERROR] Failed to calculate weight for {key}: {e}")
             raise e
         
         # Copy directly back into the ORIGINAL DFloat11 buffer (in-place)
-        weight.view(-1).copy_(new_weight.view(-1).to(torch.bfloat16))
-        
-        del new_weight  # Free immediately
+        weight.copy_(fp16_buffer)
             
     return lora_hook
 
