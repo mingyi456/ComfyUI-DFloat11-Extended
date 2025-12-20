@@ -308,6 +308,15 @@ class DFloat11CheckpointCompressor:
         
         save_path = f"{os.path.splitext(ckpt_path)[0]}-DF11"
 
+        # FORCE BF16 CAST (required by DFloat11)
+        for name, param in diffusion_model.named_parameters():
+            if param is not None:
+                param.data = param.data.to(torch.bfloat16)
+
+        for name, buffer in diffusion_model.named_buffers():
+            if buffer is not None:
+                diffusion_model._buffers[name] = buffer.to(torch.bfloat16)
+
         compress_model(
             model=diffusion_model,
             pattern_dict=MODEL_TO_PATTERN_DICT[model_type],
