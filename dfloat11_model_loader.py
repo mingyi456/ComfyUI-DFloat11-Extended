@@ -120,7 +120,7 @@ class CheckpointLoaderWithDFloat11(CheckpointLoaderSimple):
     def load_checkpoint_with_df11(self, ckpt_name, dfloat11_model_name):
         ckpt_path = folder_paths.get_full_path_or_raise("checkpoints", ckpt_name)
         out = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, embedding_directory=folder_paths.get_folder_paths("embeddings"))
-        diffusion_model, clip, vae, *_ = out
+        model_patcher, clip, vae, *_ = out
 
         dfloat11_model_path = folder_paths.get_full_path_or_raise("diffusion_models", dfloat11_model_name)
         state_dict = comfy.utils.load_torch_file(dfloat11_model_path)
@@ -129,15 +129,23 @@ class CheckpointLoaderWithDFloat11(CheckpointLoaderSimple):
 
         load_device = comfy.model_management.get_torch_device()
         offload_device = comfy.model_management.unet_offload_device()
+        
+        df11_model_patcher = DFloat11ModelPatcher(
+            model_patcher.model,
+            load_device=load_device,
+            offload_device=offload_device
+        )
+        
+        del model_patcher
 
         DFloat11Model.from_single_file(
             dfloat11_model_path,
-            pattern_dict=MODEL_TO_PATTERN_DICT[type(diffusion_model.model).__name__],
-            bfloat16_model=diffusion_model.model.diffusion_model,
+            pattern_dict=MODEL_TO_PATTERN_DICT[type(df11_model_patcher.model).__name__],
+            bfloat16_model=df11_model_patcher.model.diffusion_model,
             device=offload_device,
         )
         
-        return (diffusion_model, clip, vae)
+        return (df11_model_patcher, clip, vae)
 
 
 
@@ -175,20 +183,23 @@ class DFloat11DiffusersModelLoader:
         
         unet_config = {
             'image_model': 'flux', 
-            'in_channels': 16, 
-            'patch_size': 2, 
-            'out_channels': 16, 
-            'vec_in_dim': 768, 
-            'context_in_dim': 4096, 
-            'hidden_size': 3072, 
-            'mlp_ratio': 4.0, 
+            'axes_dim': [16, 56, 56], 
             'num_heads': 24, 
+            'mlp_ratio': 4.0, 
+            'theta': 10000, 
+            'out_channels': 16, 
+            'qkv_bias': True, 
+            'txt_ids_dims': [], 
+            'in_channels': 16, 
+            'hidden_size': 3072, 
+            'context_in_dim': 4096, 
+            'patch_size': 2, 
+            'vec_in_dim': 768, 
             'depth': 19, 
             'depth_single_blocks': 38, 
-            'axes_dim': [16, 56, 56], 
-            'theta': 10000, 
-            'qkv_bias': True, 
-            'guidance_embed': True
+            'guidance_embed': True, 
+            'yak_mlp': False, 
+            'txt_norm': False
         }
         
         unet_config["guidance_embed"] = "time_text_embed.guidance_embedder.linear_1.weight" in state_dict
@@ -206,7 +217,7 @@ class DFloat11DiffusersModelLoader:
         )
 
         return (
-            CustomChromaModelPatcher(model, load_device=load_device, offload_device=offload_device),
+            DFloat11ModelPatcher(model, load_device=load_device, offload_device=offload_device),
         )
 
 class DFloat11ModelCompressor:
