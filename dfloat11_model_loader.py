@@ -5,7 +5,8 @@ import os
 
 from nodes import CheckpointLoaderSimple
 from dfloat11 import DFloat11Model, compress_model
-from .dfloat11_custom import DFloat11FluxDiffusersModel, DFloat11ModelPatcher
+from .dfloat11_custom import DFloat11ModelPatcher
+from .dfloat11_diffusers import DFloat11FluxDiffusersModel
 from .convert_fixed_tensors import convert_diffusers_to_comfyui_flux
 from .pattern_dict import MODEL_TO_PATTERN_DICT
 
