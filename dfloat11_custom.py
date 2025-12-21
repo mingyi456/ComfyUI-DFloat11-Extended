@@ -9,11 +9,47 @@ import logging
 import inspect
 from comfy.model_patcher import LowVramPatch, move_weight_functions, wipe_lowvram_weight, get_key_weight, string_to_seed
 from comfy.patcher_extension import CallbacksMP
+class CastBufferManager:
+    """Manages a reusable float16 buffer for dtype conversion - mirrors TensorManager pattern"""
+    _tensors = {}
+
+    @staticmethod
+    def get_float16_buffer(device, n_elements):
+        if isinstance(device, str):
+            device = torch.device(device)
+        
+        if device in CastBufferManager._tensors:
+            existing = CastBufferManager._tensors[device]
+            if existing.numel() >= n_elements:
+                return existing[:n_elements]
+            del CastBufferManager._tensors[device]
+            torch.cuda.empty_cache()
+        
+        new_tensor = torch.empty(n_elements, dtype=torch.float16, device=device)
+        CastBufferManager._tensors[device] = new_tensor
+        return new_tensor
+
 
 def get_hook_lora(patch_list, key):
     def lora_hook(module, input):
-        new_weight = comfy.lora.calculate_weight(patch_list, module.weight, key)
-        module.weight = comfy.float.stochastic_rounding(new_weight, module.weight.dtype, seed=string_to_seed(key))
+        weight = module.weight  # bfloat16 view into TensorManager buffer
+        original_shape = weight.shape
+        n_elements = weight.numel()
+        
+        # Get reusable fp16 buffer
+        fp16_buffer = CastBufferManager.get_float16_buffer(weight.device, n_elements).view(original_shape)
+        fp16_buffer.copy_(weight)
+        
+        # Calculate LoRA - this creates a new tensor (unavoidable)
+        try:
+            comfy.lora.calculate_weight(patch_list, fp16_buffer, key)
+        except Exception as e:
+            print(f"[LORA HOOK ERROR] Failed to calculate weight for {key}: {e}")
+            raise e
+        
+        # Copy directly back into the ORIGINAL DFloat11 buffer (in-place)
+        weight.copy_(fp16_buffer)
+            
     return lora_hook
 
 def df11_module_size(module):
@@ -56,25 +92,15 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
         compressed tensor structure.
         """
         return 0
-    
-    def unpatch_hooks(self):
-        # 1. Run standard ComfyUI unpatching
-        super().unpatch_hooks()
-        
-        # 2. Explicitly remove our custom LoRA hooks
-        if hasattr(self, "lora_hook_handles"):
-            for hook in self.lora_hook_handles:
-                hook.remove()
-            self.lora_hook_handles.clear()
 
     def _patch_state_dict(self, state_dict_func):
-        lora_loading_functions = {"model_lora_keys_unet", "add_patches"}
+        lora_loading_functions = {"model_lora_keys_unet", "add_patches"} 
         from . import state_dict_shapes
         all_keys = set()
         for name in state_dict_shapes.__all__:
             keys_dict = getattr(state_dict_shapes, name)
             all_keys.update(keys_dict.keys())
-            
+        
         # TODO: Refine fake_state_dict to return only model-specific keys instead of all keys
         # from Chroma, Flux, and Z Image. Current approach has significant key overlap between
         # model types (e.g., Flux.1-dev vs Flux.1-schnell) which could cause issues.
@@ -104,13 +130,48 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                 loading.append((comfy.model_management.module_size(module), n, module, params))
 
         return loading
+    
+    def _clear_all_lora_hooks_from_model(self):
+        """Remove ALL lora_hook forward pre-hooks from the model - not just ones we have handles for"""
+        removed = 0
+        for n, m in self.model.named_modules():
+            if hasattr(m, '_forward_pre_hooks'):
+                hooks_to_remove = []
+                for hook_id, hook_fn in list(m._forward_pre_hooks.items()):
+                    fn_name = getattr(hook_fn, '__name__', '') + getattr(hook_fn, '__qualname__', '')
+                    if 'lora_hook' in fn_name:
+                        hooks_to_remove.append(hook_id)
+                for hook_id in hooks_to_remove:
+                    del m._forward_pre_hooks[hook_id]
+                    removed += 1
+        self.lora_hook_handles.clear()
+        if removed > 0:
+            logging.debug(f"[DF11] Cleared {removed} LoRA hooks from model")
+        return removed
+
+    def _reset_patched_weights(self):
+        """Clear comfy_patched_weights flags to force re-decode on next load"""
+        for n, m in self.model.named_modules():
+            if hasattr(m, 'comfy_patched_weights'):
+                m.comfy_patched_weights = False
 
     def load(self, device_to=None, lowvram_model_memory=0, force_patch_weights=False, full_load=False):
         with self.use_ejected():
-            self.unpatch_hooks()
+            # KEY: Check if patches changed using the MODEL's stored uuid (like official ComfyUI)
+            patches_changed = self.model.current_weight_patches_uuid != self.patches_uuid
+            
+            if patches_changed:
+                logging.info(f"[DF11] Patches changed, clearing LoRA hooks and resetting weights")
+                self._clear_all_lora_hooks_from_model()
+                self._reset_patched_weights()
+            
+            # Determine if we need to register new hooks
+            has_patches = len(self.patches) > 0
+            need_new_hooks = has_patches and patches_changed
+
+            super().unpatch_hooks()
+
             mem_counter = 0
-            patch_counter = 0
-            lowvram_counter = 0
             loading = self._load_list()
 
             load_completely = []
@@ -121,59 +182,28 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                 params = x[3]
                 module_mem = x[0]
 
-                lowvram_weight = False
-
                 weight_key = "{}.weight".format(n)
                 bias_key = "{}.bias".format(n)
 
-                if not full_load and hasattr(m, "comfy_cast_weights"):
-                    if mem_counter + module_mem >= lowvram_model_memory:
-                        lowvram_weight = True
-                        lowvram_counter += 1
-                        if hasattr(m, "prev_comfy_cast_weights"): #Already lowvramed
-                            continue
-                        
-                cast_weight = self.force_cast_weights
-                if lowvram_weight:
-                    if hasattr(m, "comfy_cast_weights"):
-                        m.weight_function = []
-                        m.bias_function = []
+                if hasattr(m, "comfy_cast_weights"):
+                    wipe_lowvram_weight(m)
 
-                    if weight_key in self.patches:
-                        if force_patch_weights:
-                            self.patch_weight_to_device(weight_key)
-                            # Register Hook & Store Handle (moved here - no longer depends on bias)
-                            handle = m.register_forward_pre_hook(get_hook_lora(self.patches[weight_key], weight_key))
-                            self.lora_hook_handles.append(handle)
-                        else:
-                            _, set_func, convert_func = get_key_weight(self.model, weight_key)
-                            m.weight_function = [LowVramPatch(weight_key, self.patches, convert_func, set_func)]
-                            patch_counter += 1
-                    if bias_key in self.patches:
-                        if force_patch_weights:
-                            self.patch_weight_to_device(bias_key)
-                        else:
-                            _, set_func, convert_func = get_key_weight(self.model, bias_key)
-                            m.bias_function = [LowVramPatch(bias_key, self.patches, convert_func, set_func)]
-                            patch_counter += 1
+                if full_load or mem_counter + module_mem < lowvram_model_memory:
+                    mem_counter += module_mem
+                    load_completely.append((module_mem, n, m, params))
 
-                    cast_weight = True
-                else:
-                    if hasattr(m, "comfy_cast_weights"):
-                        wipe_lowvram_weight(m)
-
-                    if full_load or mem_counter + module_mem < lowvram_model_memory:
-                        mem_counter += module_mem
-                        load_completely.append((module_mem, n, m, params))
-
-                if cast_weight and hasattr(m, "comfy_cast_weights"):
+                if hasattr(m, "comfy_cast_weights"):
                     m.prev_comfy_cast_weights = m.comfy_cast_weights
                     m.comfy_cast_weights = True
 
                 if weight_key in self.weight_wrapper_patches:
+                    if not hasattr(m, 'weight_function'):
+                        m.weight_function = []
                     m.weight_function.extend(self.weight_wrapper_patches[weight_key])
 
                 if bias_key in self.weight_wrapper_patches:
+                    if not hasattr(m, 'bias_function'):
+                        m.bias_function = []
                     m.bias_function.extend(self.weight_wrapper_patches[bias_key])
 
                 mem_counter += move_weight_functions(m, device_to)
@@ -182,44 +212,41 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
             for x in load_completely:
                 n = x[1]
                 m = x[2]
-                params = x[3] # ['weight', 'bias']
-                if hasattr(m, "comfy_patched_weights"):
-                    if m.comfy_patched_weights == True:
-                        continue
+                params = x[3]
 
+                # Skip if already loaded and patches haven't changed
+                if hasattr(m, "comfy_patched_weights") and m.comfy_patched_weights and not patches_changed:
+                    continue
+
+                # Trigger weight loading (DFloat11 decode happens here or on first forward)
                 for param in params:
                     self.patch_weight_to_device("{}.{}".format(n, param), device_to=device_to)
-                
-                # Apply LoRA Hook if patches exist for this module's weight
-                # We do this OUTSIDE the param loop to ensure it happens once per module
-                # and doesn't depend on "bias" existing.
-                weight_key = f"{n}.weight"
-                if weight_key in self.patches:
-                     handle = m.register_forward_pre_hook(get_hook_lora(self.patches[weight_key], weight_key))
-                     self.lora_hook_handles.append(handle)
 
-                logging.debug("lowvram: loaded module regularly {} {}".format(n, m))
+                # Register LoRA hooks ONLY if we need new ones
+                weight_key = f"{n}.weight"
+                if need_new_hooks and weight_key in self.patches:
+                    handle = m.register_forward_pre_hook(get_hook_lora(self.patches[weight_key], weight_key))
+                    self.lora_hook_handles.append(handle)
+
                 m.comfy_patched_weights = True
 
             for x in load_completely:
                 x[2].to(device_to)
 
-            if lowvram_counter > 0:
-                logging.info("loaded partially {} {} {}".format(lowvram_model_memory / (1024 * 1024), mem_counter / (1024 * 1024), patch_counter))
-                self.model.model_lowvram = True
-            else:
-                logging.info("loaded completely {} {} {}".format(lowvram_model_memory / (1024 * 1024), mem_counter / (1024 * 1024), full_load))
-                self.model.model_lowvram = False
-                if full_load:
-                    self.model.to(device_to)
-                    mem_counter = self.model_size()
+            if full_load:
+                self.model.to(device_to)
+                mem_counter = self.model_size()
 
-            self.model.lowvram_patch_counter += patch_counter
+            # Update model state (this is what ComfyUI checks next time)
+            self.model.model_lowvram = False
+            self.model.lowvram_patch_counter = 0
             self.model.device = device_to
             self.model.model_loaded_weight_memory = mem_counter
-            self.model.current_weight_patches_uuid = self.patches_uuid
+            self.model.current_weight_patches_uuid = self.patches_uuid  # KEY: Store on model
 
             for callback in self.get_all_callbacks(CallbacksMP.ON_LOAD):
                 callback(self, device_to, lowvram_model_memory, force_patch_weights, full_load)
 
             self.apply_hooks(self.forced_hooks, force_apply=True)
+
+            logging.info(f"[DF11] Load complete. LoRA hooks: {len(self.lora_hook_handles)}, has_patches: {has_patches}")
