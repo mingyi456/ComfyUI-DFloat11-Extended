@@ -647,7 +647,7 @@ chroma_keys_dict = {
 }
 
 
-flux_keys_dict = {
+flux_schnell_keys_dict = {
     "double_blocks.0.img_attn.norm.key_norm.scale" : torch.Size([128]),
     "double_blocks.0.img_attn.norm.query_norm.scale" : torch.Size([128]),
     "double_blocks.0.img_attn.proj.bias" : torch.Size([3072]),
@@ -1108,10 +1108,6 @@ flux_keys_dict = {
     "final_layer.adaLN_modulation.1.weight" : torch.Size([6144, 3072]),
     "final_layer.linear.bias" : torch.Size([64]),
     "final_layer.linear.weight" : torch.Size([64, 3072]),
-    "guidance_in.in_layer.bias" : torch.Size([3072]),
-    "guidance_in.in_layer.weight" : torch.Size([3072, 256]),
-    "guidance_in.out_layer.bias" : torch.Size([3072]),
-    "guidance_in.out_layer.weight" : torch.Size([3072, 3072]),
     "img_in.bias" : torch.Size([3072]),
     "img_in.weight" : torch.Size([3072, 64]),
     "single_blocks.0.linear1.bias" : torch.Size([21504]),
@@ -1428,6 +1424,13 @@ flux_keys_dict = {
     "vector_in.in_layer.weight" : torch.Size([3072, 768]),
     "vector_in.out_layer.bias" : torch.Size([3072]),
     "vector_in.out_layer.weight" : torch.Size([3072, 3072]),
+}
+
+flux_keys_dict = flux_schnell_keys_dict | {
+    "guidance_in.in_layer.bias" : torch.Size([3072]),
+    "guidance_in.in_layer.weight" : torch.Size([3072, 256]),
+    "guidance_in.out_layer.bias" : torch.Size([3072]),
+    "guidance_in.out_layer.weight" : torch.Size([3072, 3072]),
 }
 
 zimage_keys_dict = {
@@ -1884,4 +1887,9 @@ zimage_keys_dict = {
     "x_embedder.weight" : torch.Size([3840, 64]),
 }
 
-__all__ = ["chroma_keys_dict", "flux_keys_dict", "zimage_keys_dict"]
+state_dict_mapping = {
+    "Chroma" : chroma_keys_dict,
+    "Flux" : flux_keys_dict,
+    "FluxSchnell" : flux_schnell_keys_dict,
+    "ZImage" : zimage_keys_dict,
+}

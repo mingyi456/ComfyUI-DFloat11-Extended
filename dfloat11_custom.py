@@ -9,6 +9,9 @@ import logging
 import inspect
 from comfy.model_patcher import LowVramPatch, move_weight_functions, wipe_lowvram_weight, get_key_weight, string_to_seed
 from comfy.patcher_extension import CallbacksMP
+
+from .state_dict_shapes import state_dict_mapping
+
 class CastBufferManager:
     """Manages a reusable float16 buffer for dtype conversion - mirrors TensorManager pattern"""
     _tensors = {}
@@ -35,19 +38,19 @@ def get_hook_lora(patch_list, key):
         weight = module.weight  # bfloat16 view into TensorManager buffer
         original_shape = weight.shape
         n_elements = weight.numel()
+        device = weight.device
         
         # Get reusable fp16 buffer
-        fp16_buffer = CastBufferManager.get_float16_buffer(weight.device, n_elements).view(original_shape)
-        fp16_buffer.copy_(weight)
+        fp16_buffer = CastBufferManager.get_float16_buffer(device, n_elements).view(original_shape)
+        fp16_buffer.copy_(weight) # `Tensor.copy_()` handles typecasting automatically
         
-        # Calculate LoRA - this creates a new tensor (unavoidable)
+        # Calculate LoRA - this mutates the `fp16_buffer` tensor in place
         try:
             comfy.lora.calculate_weight(patch_list, fp16_buffer, key)
         except Exception as e:
             print(f"[LORA HOOK ERROR] Failed to calculate weight for {key}: {e}")
             raise e
         
-        # Copy directly back into the ORIGINAL DFloat11 buffer (in-place)
         weight.copy_(fp16_buffer)
             
     return lora_hook
@@ -77,9 +80,34 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
     def __init__(self, model, load_device, offload_device, size=0, weight_inplace_update=False):
         super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
 
-        self.model.state_dict = self._patch_state_dict(self.model.state_dict)
-        # List to keep track of PyTorch hooks so we can remove them later
+        self._patch_state_dict()
+        # List to keep track of PyTorch hooks, currently unused but retained just-in-case
         self.lora_hook_handles = []
+
+    def _patch_state_dict(self):
+        if hasattr(self.model.state_dict, "patched_for_lora"):
+            return
+        state_dict_func = self.model.state_dict
+        df11_type = type(self.model.model_config).__name__
+        if df11_type in state_dict_mapping:
+            print(f"[DF11] Supported df11_type for LoRA: {df11_type}")
+            fake_keys = state_dict_mapping[df11_type].keys()
+            fake_state_dict = {f"diffusion_model.{key}": None for key in fake_keys}
+        else:
+            print(f"[DF11] Unsupported df11_type for LoRA: {df11_type}")
+            fake_state_dict = state_dict_func()
+        
+        lora_loading_functions = {"model_lora_keys_unet", "add_patches"} 
+        
+        def new_state_dict_func():
+            call_stack = inspect.stack()
+            caller_function = call_stack[1].function
+            del call_stack
+            if caller_function in lora_loading_functions:
+                return fake_state_dict
+            return state_dict_func()
+        self.model.state_dict = new_state_dict_func
+        self.model.state_dict.patched_for_lora = True
 
     def partially_unload(self, offload_device, memory_to_free=0):
         """
@@ -93,29 +121,11 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
         """
         return 0
 
-    def _patch_state_dict(self, state_dict_func):
-        lora_loading_functions = {"model_lora_keys_unet", "add_patches"} 
-        from . import state_dict_shapes
-        all_keys = set()
-        for name in state_dict_shapes.__all__:
-            keys_dict = getattr(state_dict_shapes, name)
-            all_keys.update(keys_dict.keys())
-        
-        # TODO: Refine fake_state_dict to return only model-specific keys instead of all keys
-        # from Chroma, Flux, and Z Image. Current approach has significant key overlap between
-        # model types (e.g., Flux.1-dev vs Flux.1-schnell) which could cause issues.
-        fake_state_dict = {f"diffusion_model.{key}": None for key in all_keys}
-        
-        def new_state_dict_func():
-            call_stack = inspect.stack()
-            caller_function = call_stack[1].function
-            del call_stack
-            if caller_function in lora_loading_functions:
-                return fake_state_dict
-            return state_dict_func()
-        return new_state_dict_func
-
     def _load_list(self):
+        # This uses the old implementation of `_load_list()`, 
+        # because the new implementation bricks due to accessing missing `.weight` attributes
+        # TODO: Update this method to align with current ComfyUI's `_load_list()` structure, 
+        # taking into account DF11
         loading = []
         for n, module in self.model.named_modules():
             params = []

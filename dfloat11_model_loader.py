@@ -56,11 +56,11 @@ class DFloat11ModelLoaderAdvanced:
         model_config = comfy.sd.model_detection.model_config_from_unet(state_dict, "")
         
         if model_config is None:
-            # Assume it is CosmosPredict2, because no other model architectures are supported yet
+            # Assume it is CosmosPredict2, because no other possible model architectures are supported yet
             state_dict["blocks.0.mlp.layer1.weight"] = None
             model_config = comfy.sd.model_detection.model_config_from_unet(state_dict, "")
             assert model_config is not None, "Unable to detect model type"
-
+        
         df11_type = type(model_config).__name__
         
         model_config.set_inference_dtype(torch.bfloat16, torch.bfloat16)
@@ -131,17 +131,19 @@ class CheckpointLoaderWithDFloat11(CheckpointLoaderSimple):
         load_device = comfy.model_management.get_torch_device()
         offload_device = comfy.model_management.unet_offload_device()
         
+        df11_type = type(model_patcher.model).__name__
+        
         df11_model_patcher = DFloat11ModelPatcher(
             model_patcher.model,
             load_device=load_device,
-            offload_device=offload_device
+            offload_device=offload_device,
         )
         
         del model_patcher
 
         DFloat11Model.from_single_file(
             dfloat11_model_path,
-            pattern_dict=MODEL_TO_PATTERN_DICT[type(df11_model_patcher.model).__name__],
+            pattern_dict=MODEL_TO_PATTERN_DICT[df11_type],
             bfloat16_model=df11_model_patcher.model.diffusion_model,
             device=offload_device,
         )
