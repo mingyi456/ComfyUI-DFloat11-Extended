@@ -80,6 +80,7 @@ DFloat11 reduces model size by more than **30%** while producing **bit-for-bit i
 7. Delete the folder, as well as the `config.json` file inside it. The config file is not required for the purposes of ComfyUI.
 
 Note: If your source model is from produced from a "ModelSave" or "Save Checkpoint" node in ComfyUI, it might not be in BF16 precision. If so, restart ComfyUI with the `--bf16-unet` command line flag, and save the model again.
+
 ---
 
 ## Resources
