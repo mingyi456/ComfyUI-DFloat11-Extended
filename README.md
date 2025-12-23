@@ -1,6 +1,6 @@
 # Extended ComfyUI Plugin for DFloat11
 
-### Update: LoRA support is now *tentatively* out of experimental stage, for Chroma, Flux and Z-Image
+### Update: LoRA support is now *tentatively* out of experimental stage, for Chroma, Flux and Z-Image. Tested using both the core LoraLoaderModelOnly node and rgthree's Power Lora Loader node.
 
 <b>Currently supported model architectures:
 - Flux.1-dev and schnell
