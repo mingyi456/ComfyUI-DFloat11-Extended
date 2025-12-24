@@ -75,7 +75,7 @@ DFloat11 reduces model size by more than **30%** while producing **bit-for-bit i
 2. Create a "DFloat11 Model Compressor" node, and select the source model
 3. Connect the node to a "Preview as Text" node.
 4. Run the workflow, and wait for the process to complete.
-5. In the `<ComfyUI_installation_path>/models/diffusion_models` directory, checkk that there is a new folder named after the source model, with a "DF11" suffix.
+5. In the `<ComfyUI_installation_path>/models/diffusion_models` directory, check that there is a new folder named after the source model, with a "DF11" suffix.
 6. Move the `model.safetensors` file out of the folder, and rename it to any name you prefer.
 7. Delete the folder, as well as the `config.json` file inside it. The config file is not required for the purposes of ComfyUI.
 
