@@ -31,7 +31,7 @@ class DFloat11ModelLoaderAdvanced:
                 "cpu_offload": ("BOOLEAN", {"default": False, "tooltip": "Whether to offload to CPU RAM"}),
                 "cpu_offload_blocks": ("INT", {"default": 0, "min": 0, "max": 999, "step": 1, "tooltip": "If set to 0, all blocks will be offloaded to CPU RAM"}),
                 "pin_memory": ("BOOLEAN", {"default": True, "tooltip": "Whether to lock/pin the weights to CPU RAM. Enabling this option increases RAM usage (which might cause OOM), but should increase speed"}),
-                "custom_modelpatcher": ("BOOLEAN", {"default": True, "tooltip": "Whether to use the experimental custom ModelPatcher. Currently only enabled for Chroma"}),
+                "custom_modelpatcher": ("BOOLEAN", {"default": True, "tooltip": "Whether to use the experimental custom ModelPatcher. Currently has no effect since disabling it will cause errors"}),
             }
         }
 
@@ -103,6 +103,30 @@ class DFloat11ModelLoader(DFloat11ModelLoaderAdvanced):
     
     def load_dfloat11_model(self, dfloat11_model_name):
         return self.load_dfloat11_model_advanced(dfloat11_model_name, cpu_offload = False, cpu_offload_blocks = 0, pin_memory = True, custom_modelpatcher = True)
+
+class DFloat11LoadingPatch:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model_patcher": ("MODEL", {"tooltip": "The model to display information for"}),
+                "load_version": (["v1", "v1.5", "v2"],)
+            }
+        }
+
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch_loading_methods"
+    CATEGORY = "DFloat11"
+
+    def patch_loading_methods(self, model_patcher, load_version):
+        
+        new_model_patcher = model_patcher.clone()
+        
+        # new_model_patcher.load_version = load_version
+        new_model_patcher.patch_loading_methods(load_version)
+        
+        return (new_model_patcher,)
+
 
 class CheckpointLoaderWithDFloat11(CheckpointLoaderSimple):
     @classmethod

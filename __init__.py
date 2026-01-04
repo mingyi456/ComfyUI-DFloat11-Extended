@@ -1,4 +1,4 @@
-from .dfloat11_model_loader import DFloat11ModelLoader, DFloat11ModelLoaderAdvanced, DFloat11DiffusersModelLoader, DFloat11ModelCompressor, DFloat11CheckpointCompressor, CheckpointLoaderWithDFloat11
+from .dfloat11_model_loader import DFloat11ModelLoader, DFloat11ModelLoaderAdvanced, DFloat11DiffusersModelLoader, DFloat11ModelCompressor, DFloat11CheckpointCompressor, CheckpointLoaderWithDFloat11, DFloat11LoadingPatch
 
 NODE_CLASS_MAPPINGS = {
     "DFloat11ModelLoader": DFloat11ModelLoader,
@@ -7,6 +7,7 @@ NODE_CLASS_MAPPINGS = {
     "DFloat11ModelCompressor": DFloat11ModelCompressor,
     "DFloat11CheckpointCompressor": DFloat11CheckpointCompressor,
     "CheckpointLoaderWithDFloat11": CheckpointLoaderWithDFloat11,
+    "DFloat11LoadingPatch" : DFloat11LoadingPatch,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
