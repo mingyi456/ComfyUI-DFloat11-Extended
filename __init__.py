@@ -17,6 +17,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "DFloat11ModelCompressor": "DFloat11 Model Compressor",
     "DFloat11CheckpointCompressor": "DFloat11 Checkpoint Compressor",
     "CheckpointLoaderWithDFloat11": "Load Checkpoint with DFloat11 Unet",
+    "DFloat11LoadingPatch" : "Patch DFloat11 Loading Mechanism",
 }
 
 
