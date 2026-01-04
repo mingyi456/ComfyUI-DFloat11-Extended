@@ -153,11 +153,6 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
         return 0
 
     def _load_list(self):
-        print("[DF11] _load_list_v1()")
-        # This uses the old implementation of `_load_list()`, 
-        # because the new implementation bricks due to accessing missing `.weight` attributes
-        # TODO: Update this method to align with current ComfyUI's `_load_list()` structure, 
-        # taking into account DF11
         loading = []
         for module_name, module in self.model.named_modules():
             params = []
@@ -296,11 +291,6 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
 
 
     def _load_list_v1_5(self):
-        print("[DF11] _load_list_v1_5()")
-        # This uses the old implementation of `_load_list()`, 
-        # because the new implementation bricks due to accessing missing `.weight` attributes
-        # TODO: Update this method to align with current ComfyUI's `_load_list()` structure, 
-        # taking into account DF11
         loading = []
         for module_name, module in self.model.named_modules():
             params = []
@@ -323,7 +313,6 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
 
 
     def _load_list_v2(self):
-        print("[DF11] _load_list_v2()")
         loading = []
         for module_name, module in self.model.named_modules():
             params = []
@@ -338,7 +327,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                     if not parent_is_offloaded(self.model, module_name):
                         module_mem += int(module.in_features * module.out_features * 1.4)
                 module_offload_mem = module_mem
-                if hasattr(module, "comfy_cast_weights"):
+                if hasattr(module, "comfy_cast_weights"): # Need to figure out why this codepath is triggered for DF11 modules
                     def check_module_offload_mem(key, module):
                         if key in self.patches:
                             return low_vram_patch_estimate_vram(self.model, key)
