@@ -339,4 +339,74 @@ MODEL_TO_PATTERN_DICT = {
             "emb_layers.1",
         ),
     },
+    
+    "WAN21_T2V" : {
+        r"text_embedding" : (
+            "0",
+            "2",
+        ),
+        r"time_embedding" : (
+            "0",
+            "2",
+        ),
+        r"time_projection" : (
+            "1",
+        ),
+        
+        r"blocks\.\d+" : (
+            "self_attn.q",
+            "self_attn.k",
+            "self_attn.v",
+            "self_attn.o",
+            "cross_attn.q",
+            "cross_attn.k",
+            "cross_attn.v",
+            "cross_attn.o",
+            "ffn.0",
+            "ffn.2"
+        ),
+    },
+
+    "WAN21_T2V_2" : {
+        r"blocks\.\d+" : (
+            "self_attn.q",
+            "self_attn.k",
+            "self_attn.v",
+            "self_attn.o",
+            "cross_attn.q",
+            "cross_attn.k",
+            "cross_attn.v",
+            "cross_attn.o",
+            "ffn.0",
+            "ffn.2"
+        ),
+    },
+
+    "WAN22_T2V" : {
+        r"text_embedding" : (
+            "0",
+            "2",
+        ),
+        r"time_embedding" : (
+            "0",
+            "2",
+        ),
+        r"time_projection" : (
+            "1",
+        ),
+        
+        r"blocks\.\d+" : (
+            "self_attn.q",
+            "self_attn.k",
+            "self_attn.v",
+            "self_attn.o",
+            "cross_attn.q",
+            "cross_attn.k",
+            "cross_attn.v",
+            "cross_attn.o",
+            "ffn.0",
+            "ffn.2"
+        ),
+    },
+    
 }

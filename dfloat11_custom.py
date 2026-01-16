@@ -244,7 +244,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                     m.bias_function.extend(self.weight_wrapper_patches[bias_key])
 
                 mem_counter += move_weight_functions(m, device_to)
-
+            
             load_completely.sort(reverse=True)
             for x in load_completely:
                 n = x[1]
@@ -267,7 +267,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                     self.lora_hook_handles.append(handle)
 
                 m.comfy_patched_weights = True
-
+            
             for x in load_completely:
                 x[2].to(device_to)
 
@@ -481,6 +481,17 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
                 if full_load:
                     self.model.to(device_to)
                     mem_counter = self.model_size()
+            
+            luts_fully_loaded = True
+            for module_name, module in self.model.named_modules():
+                if hasattr(module, "luts") and module.luts.device.type == "cpu":
+                    luts_fully_loaded = False
+                    temp = module.luts
+                    module.luts = temp.to(device_to, non_blocking=True)
+                    del temp
+            
+            if not luts_fully_loaded:
+                print(f"[DF11] Warning: {module_name}.luts.device is on cpu, moving to gpu. However, errors will likely occur")
 
             self.model.lowvram_patch_counter += patch_counter
             self.model.device = device_to
