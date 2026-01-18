@@ -6,6 +6,7 @@ import os
 from nodes import CheckpointLoaderSimple
 from dfloat11 import DFloat11Model, compress_model
 from .dfloat11_custom import DFloat11ModelPatcher
+from .dfloat11_decompress import decompress_state_dict_func_map
 from .dfloat11_diffusers import DFloat11FluxDiffusersModel
 from .convert_fixed_tensors import convert_diffusers_to_comfyui_flux
 from .pattern_dict import MODEL_TO_PATTERN_DICT
@@ -52,8 +53,14 @@ class DFloat11ModelLoaderAdvanced:
 
         load_device = comfy.model_management.get_torch_device()
         offload_device = comfy.model_management.unet_offload_device()
+        
+        missing_keys = {}
 
-        model_config = comfy.sd.model_detection.model_config_from_unet(state_dict, "")
+        if "double_stream_modulation_img.lin.sign_mantissa" in state_dict and "double_stream_modulation_img.lin.weight" not in state_dict:
+            missing_keys["double_stream_modulation_img.lin.weight"] = None
+
+
+        model_config = comfy.sd.model_detection.model_config_from_unet(state_dict | missing_keys, "")
         
         if model_config is None:
             # Assume it is CosmosPredict2, because no other possible model architectures are supported yet
@@ -103,6 +110,46 @@ class DFloat11ModelLoader(DFloat11ModelLoaderAdvanced):
     
     def load_dfloat11_model(self, dfloat11_model_name):
         return self.load_dfloat11_model_advanced(dfloat11_model_name, cpu_offload = False, cpu_offload_blocks = 0, pin_memory = True, custom_modelpatcher = True)
+
+
+class DFloat11Decompressor:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "dfloat11_model_name": (folder_paths.get_filename_list("diffusion_models"),),
+                "decompress_recipe": (["Flux.2-Klein-4B", "Flux.2-Klein-9B"],),
+                "weight_dtype": (["default", "fp8_e4m3fn", "fp8_e4m3fn_fast", "fp8_e5m2"],)
+            }
+        }
+
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "decompress_dfloat11_model"
+    CATEGORY = "DFloat11"
+    
+    def decompress_dfloat11_model(self, dfloat11_model_name, decompress_recipe, weight_dtype):
+        dfloat11_model_path = folder_paths.get_full_path_or_raise("diffusion_models", dfloat11_model_name)
+        df11_state_dict = comfy.utils.load_torch_file(dfloat11_model_path)
+
+        if not any(k.endswith("encoded_exponent") for k in df11_state_dict.keys()):
+            raise ValueError(f"The model '{dfloat11_model_name}' is not a DFloat11 model.")
+            
+        reconstructed_state_dict = decompress_state_dict_func_map[decompress_recipe](df11_state_dict)
+        
+        model_options = {}
+        if weight_dtype == "fp8_e4m3fn":
+            model_options["dtype"] = torch.float8_e4m3fn
+        elif weight_dtype == "fp8_e4m3fn_fast":
+            model_options["dtype"] = torch.float8_e4m3fn
+            model_options["fp8_optimizations"] = True
+        elif weight_dtype == "fp8_e5m2":
+            model_options["dtype"] = torch.float8_e5m2
+            
+        model_patcher = comfy.sd.load_diffusion_model_state_dict(reconstructed_state_dict, model_options=model_options)
+        
+        return (model_patcher,)
+
+
 
 class DFloat11LoadingPatch:
     @classmethod

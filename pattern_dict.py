@@ -37,6 +37,45 @@ MODEL_TO_PATTERN_DICT = {
             "modulation.lin",
         ),
     },
+    
+    "Flux2": {
+        r"double_blocks\.\d+" : (
+            "img_attn.qkv",
+            "img_attn.proj",
+            "img_mlp.0",
+            "img_mlp.2",
+            "txt_attn.qkv",
+            "txt_attn.proj",
+            "txt_mlp.0",
+            "txt_mlp.2",
+        ),
+        r"single_blocks\.\d+" : (
+            "linear1",
+            "linear2",
+        ),
+        
+        "double_stream_modulation_img\.lin" : [],
+        "double_stream_modulation_txt\.lin" : [],
+        "single_stream_modulation\.lin" : [],
+    },
+
+    "Flux2-alt": {
+        r"double_blocks\.\d+" : (
+            "img_attn.qkv",
+            "img_attn.proj",
+            "img_mlp.0",
+            "img_mlp.2",
+            "txt_attn.qkv",
+            "txt_attn.proj",
+            "txt_mlp.0",
+            "txt_mlp.2",
+        ),
+        r"single_blocks\.\d+" : (
+            "linear1",
+            "linear2",
+        ),
+    },
+
     "Chroma": {
         r"distilled_guidance_layer\.layers\.\d+": (
             "in_layer",
