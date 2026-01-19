@@ -1,6 +1,6 @@
 # Extended ComfyUI Plugin for DFloat11
 
-### Update: LoRA support is now *tentatively* out of experimental stage, for Chroma, Flux and Z-Image. Tested with 2 loras using both the core LoraLoaderModelOnly node and rgthree's Power Lora Loader node. Also, [Z-Image controlnet](https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1) should work out-of-the-box.
+### Update: Flux.2-klein is now supported, but there is currently an unexplainable bug causing outputs to be slightly different from BF16 output. I am currently looking into this issue, and in the meantime I have added a new decompressor node that fully decompresses the model weights, so it acts like a regular Load Diffusion Model node. 
 
 <b>Currently supported model architectures:
 - Flux.1-dev and schnell
