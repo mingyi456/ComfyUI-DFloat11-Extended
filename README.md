@@ -4,6 +4,7 @@
 
 <b>Currently supported model architectures:
 - Flux.1-dev and schnell
+- Flux.2-klein (currently buggy, will look into this)
 - Chroma
 - Chroma-Radiance
 - SDXL (UNET component only, requires the `--bf16-unet` command-line flag)
