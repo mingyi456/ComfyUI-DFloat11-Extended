@@ -157,7 +157,8 @@ class DFloat11LoadingPatch:
         return {
             "required": {
                 "model_patcher": ("MODEL", {"tooltip": "The model to display information for"}),
-                "load_version": (["v1", "v1.5", "v2"],)
+                "load_version": (["v1", "v1.5", "v2"],),
+                "memory_usage_factor_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step":0.01, "round": 0.01, "tooltip": "The multiplier to scale ComfyUI's memory usage estimation"}),
             }
         }
 
@@ -165,13 +166,15 @@ class DFloat11LoadingPatch:
     FUNCTION = "patch_loading_methods"
     CATEGORY = "DFloat11"
 
-    def patch_loading_methods(self, model_patcher, load_version):
+    def patch_loading_methods(self, model_patcher, load_version, memory_usage_factor_scale):
         
         new_model_patcher = model_patcher.clone()
         
-        # new_model_patcher.load_version = load_version
         new_model_patcher.patch_loading_methods(load_version)
-        
+
+        new_model_patcher.model.model_config.memory_usage_factor *= memory_usage_factor_scale
+        new_model_patcher.model.memory_usage_factor = new_model_patcher.model.model_config.memory_usage_factor
+
         return (new_model_patcher,)
 
 

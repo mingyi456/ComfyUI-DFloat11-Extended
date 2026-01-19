@@ -140,7 +140,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
         self.model.state_dict = new_state_dict_func
         self.model.state_dict.patched_for_lora = True
 
-    def partially_unload(self, offload_device, memory_to_free=0):
+    def partially_unload(self, offload_device, memory_to_free=0, force_patch_weights=False):
         """
         DFloat11 compressed modules don't have a standard '.weight' attribute - 
         it's replaced with compressed tensors (encoded_exponent, sign_mantissa, etc.).
