@@ -342,7 +342,7 @@ def decompress_state_dict_flux_2_klein_4b(df11_state_dict):
         del split_positions
     
     uncompressed_keys = bf16_sizes.keys() & df11_state_dict.keys()
-    reconstructed_state_dict.update((key, df11_state_dict[key]) for key in uncompressed_keys)
+    reconstructed_state_dict.update(df11_state_dict)
     del df11_state_dict
     
     gc.collect()
@@ -732,7 +732,7 @@ def decompress_state_dict_flux_2_klein_9b(df11_state_dict):
         del split_positions
     
     uncompressed_keys = bf16_sizes.keys() & df11_state_dict.keys()
-    reconstructed_state_dict.update((key, df11_state_dict[key]) for key in uncompressed_keys)
+    reconstructed_state_dict.update(df11_state_dict)
     del df11_state_dict
     
     gc.collect()
