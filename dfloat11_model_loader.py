@@ -55,10 +55,11 @@ class DFloat11ModelLoaderAdvanced:
         offload_device = comfy.model_management.unet_offload_device()
         
         missing_keys = {}
-
+        
+        
         if "double_stream_modulation_img.lin.sign_mantissa" in state_dict and "double_stream_modulation_img.lin.weight" not in state_dict:
             missing_keys["double_stream_modulation_img.lin.weight"] = None
-
+        
 
         model_config = comfy.sd.model_detection.model_config_from_unet(state_dict | missing_keys, "")
         
@@ -329,7 +330,7 @@ class DFloat11ModelCompressor:
             save_path= save_path,
             save_single_file= True,
             check_correctness= True,
-            block_range= (0, 100),
+            block_range= (0, 500),
         )
 
         return (save_path,)

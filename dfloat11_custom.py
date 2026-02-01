@@ -7,7 +7,7 @@ import os
 
 import logging
 import inspect
-from comfy.model_patcher import LowVramPatch, move_weight_functions, wipe_lowvram_weight, get_key_weight, string_to_seed
+from comfy.model_patcher import LowVramPatch, move_weight_functions, wipe_lowvram_weight, get_key_weight
 from comfy.patcher_extension import CallbacksMP
 
 from comfy.quant_ops import QuantizedTensor
