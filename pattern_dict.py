@@ -143,6 +143,44 @@ MODEL_TO_PATTERN_DICT = {
             "adaln_modulation_mlp.2",
         )
     },
+    "Anima": {
+        r"t_embedder\.1" : (
+            "linear_1",
+            "linear_2",
+        ),
+        r"blocks\.\d+" : (
+            "self_attn.q_proj",
+            "self_attn.k_proj",
+            "self_attn.v_proj",
+            "self_attn.output_proj",
+            "cross_attn.q_proj",
+            "cross_attn.k_proj",
+            "cross_attn.v_proj",
+            "cross_attn.output_proj",
+            "mlp.layer1",
+            "mlp.layer2",
+            "adaln_modulation_self_attn.1",
+            "adaln_modulation_self_attn.2",
+            "adaln_modulation_cross_attn.1",
+            "adaln_modulation_cross_attn.2",
+            "adaln_modulation_mlp.1",
+            "adaln_modulation_mlp.2",
+        ),
+        r"llm_adapter\.embed": [],
+        
+        r"llm_adapter\.blocks\.\d+" : (
+            "self_attn.q_proj",
+            "self_attn.k_proj",
+            "self_attn.v_proj",
+            "self_attn.o_proj",
+            "cross_attn.q_proj",
+            "cross_attn.k_proj",
+            "cross_attn.v_proj",
+            "cross_attn.o_proj",
+            "mlp.0",
+            "mlp.2",
+        ),
+    },
     "Lumina2": {
         r"noise_refiner\.\d+": (
             "attention.qkv",

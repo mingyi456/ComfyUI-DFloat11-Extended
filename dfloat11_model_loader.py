@@ -54,19 +54,24 @@ class DFloat11ModelLoaderAdvanced:
         load_device = comfy.model_management.get_torch_device()
         offload_device = comfy.model_management.unet_offload_device()
         
+        # TODO: Refactor the logic for detecting `df11_type` into an external function
         missing_keys = {}
-        
         
         if "double_stream_modulation_img.lin.sign_mantissa" in state_dict and "double_stream_modulation_img.lin.weight" not in state_dict:
             missing_keys["double_stream_modulation_img.lin.weight"] = None
-        
 
         model_config = comfy.sd.model_detection.model_config_from_unet(state_dict | missing_keys, "")
         
         if model_config is None:
-            # Assume it is CosmosPredict2, because no other possible model architectures are supported yet
-            state_dict["blocks.0.mlp.layer1.weight"] = None
-            model_config = comfy.sd.model_detection.model_config_from_unet(state_dict, "")
+            # In case `model_config` cannot be found, the possible options are Anima and CosmosPredict2
+            missing_keys = {}
+            if "llm_adapter.blocks.0.sign_mantissa" in state_dict:
+                # This should be Anima
+                missing_keys["llm_adapter.blocks.0.cross_attn.q_proj.weight"] = None
+                
+            # This applies to both Anima and CosmosPredict2
+            missing_keys["blocks.0.mlp.layer1.weight"] = None
+            model_config = comfy.sd.model_detection.model_config_from_unet(state_dict | missing_keys, "")
             assert model_config is not None, "Unable to detect model type"
         
         df11_type = type(model_config).__name__
