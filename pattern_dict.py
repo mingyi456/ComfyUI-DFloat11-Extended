@@ -416,4 +416,71 @@ MODEL_TO_PATTERN_DICT = {
             "emb_layers.1",
         ),
     },
+    
+    "ACEStep15" : {
+        r"decoder\.time_embed": (
+            "linear_1",
+            "linear_2",
+            "time_proj",
+        ),
+        r"decoder\.time_embed_r": (
+            "linear_1",
+            "linear_2",
+            "time_proj",
+        ),
+        
+        r"decoder\.layers\.\d+": (
+            "self_attn.q_proj",
+            "self_attn.k_proj",
+            "self_attn.v_proj",
+            "self_attn.o_proj",
+            "cross_attn.q_proj",
+            "cross_attn.k_proj",
+            "cross_attn.v_proj",
+            "cross_attn.o_proj",
+            "mlp.gate_proj",
+            "mlp.up_proj",
+            "mlp.down_proj",
+        ),
+        
+        r"encoder\.lyric_encoder\.layers\.\d++": (
+            "self_attn.q_proj",
+            "self_attn.k_proj",
+            "self_attn.v_proj",
+            "self_attn.o_proj",
+            "mlp.gate_proj",
+            "mlp.up_proj",
+            "mlp.down_proj",
+        ),
+        r"encoder\.timbre_encoder\.layers\.\d+": (
+            "self_attn.q_proj",
+            "self_attn.k_proj",
+            "self_attn.v_proj",
+            "self_attn.o_proj",
+            "mlp.gate_proj",
+            "mlp.up_proj",
+            "mlp.down_proj",
+        ),
+
+        r"tokenizer\.attention_pooler\.layers\.\d+": (
+            "self_attn.q_proj",
+            "self_attn.k_proj",
+            "self_attn.v_proj",
+            "self_attn.o_proj",
+            "mlp.gate_proj",
+            "mlp.up_proj",
+            "mlp.down_proj",
+        ),
+
+        r"detokenizer\.layers\.\d+": (
+            "self_attn.q_proj",
+            "self_attn.k_proj",
+            "self_attn.v_proj",
+            "self_attn.o_proj",
+            "mlp.gate_proj",
+            "mlp.up_proj",
+            "mlp.down_proj",
+        ),
+
+    },
 }
