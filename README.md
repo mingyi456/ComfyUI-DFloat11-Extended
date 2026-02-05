@@ -10,7 +10,9 @@
 - SDXL (UNET component only, requires the `--bf16-unet` command-line flag)
 - Cosmos Predict 2 Text2Image
 - Lumina Image 2.0
-- Z-Image</b>
+- Z-Image
+- Anima
+- ACE-Step v1.5</b>
 
 <b>Currently supported features:
 - LoRA support for Chroma, Flux and Z Image
