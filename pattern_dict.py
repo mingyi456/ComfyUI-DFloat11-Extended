@@ -38,6 +38,28 @@ MODEL_TO_PATTERN_DICT = {
         ),
     },
     
+    "OvisImage": {
+            r"double_blocks\.\d+": (
+            "img_mod.lin",
+            "img_attn.qkv",
+            "img_attn.proj",
+            "img_mlp.gate_proj",
+            "img_mlp.up_proj",
+            "img_mlp.down_proj",
+            "txt_mod.lin",
+            "txt_attn.qkv",
+            "txt_attn.proj",
+            "txt_mlp.gate_proj",
+            "txt_mlp.up_proj",
+            "txt_mlp.down_proj",
+        ),
+        r"single_blocks\.\d+": (
+            "linear1",
+            "linear2",
+            "modulation.lin",
+        ),
+    },
+    
     "Flux2": {
         r"double_blocks\.\d+" : (
             "img_attn.qkv",
@@ -481,6 +503,5 @@ MODEL_TO_PATTERN_DICT = {
             "mlp.up_proj",
             "mlp.down_proj",
         ),
-
     },
 }
