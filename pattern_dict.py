@@ -38,6 +38,27 @@ MODEL_TO_PATTERN_DICT = {
         ),
     },
     
+    "LongCatImage" : {
+        r"double_blocks\.\d+": (
+            "img_mod.lin",
+            "img_attn.qkv",
+            "img_attn.proj",
+            "img_mlp.0",
+            "img_mlp.2",
+            "txt_mod.lin",
+            "txt_attn.qkv",
+            "txt_attn.proj",
+            "txt_mlp.0",
+            "txt_mlp.2",
+        ),
+
+        r"single_blocks\.\d+": (
+            "linear1",
+            "linear2",
+            "modulation.lin",
+        ),
+    },
+    
     "OvisImage": {
             r"double_blocks\.\d+": (
             "img_mod.lin",
@@ -505,3 +526,4 @@ MODEL_TO_PATTERN_DICT = {
         ),
     },
 }
+

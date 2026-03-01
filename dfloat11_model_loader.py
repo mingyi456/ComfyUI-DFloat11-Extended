@@ -57,7 +57,7 @@ class DFloat11ModelLoaderAdvanced:
         # TODO: Refactor the logic for detecting `df11_type` into an external function
         missing_keys = {}
         
-        if "double_blocks.0.img_mlp.gate_proj.bias" in state_dict and "txt_norm.scale" in state_dict:
+        if "double_blocks.0.img_mlp.gate_proj.bias" in state_dict and ("txt_norm.scale" in state_dict or "txt_norm.weight" in state_dict):
             missing_keys["double_blocks.0.img_mlp.gate_proj.weight"] = None
         
         if "double_stream_modulation_img.lin.sign_mantissa" in state_dict and "double_stream_modulation_img.lin.weight" not in state_dict:
@@ -80,7 +80,6 @@ class DFloat11ModelLoaderAdvanced:
         df11_type = type(model_config).__name__
         
         if df11_type == "FluxSchnell" and model_config.unet_config.get("yak_mlp", False) and model_config.unet_config.get("txt_norm", False):
-            print("Overriding `df11_type` to Ovis")
             df11_type = "OvisImage"
         
         model_config.set_inference_dtype(torch.bfloat16, torch.bfloat16)
@@ -97,6 +96,7 @@ class DFloat11ModelLoaderAdvanced:
             cpu_offload_blocks=cpu_offload_blocks if cpu_offload_blocks > 0 else None,
             pin_memory=pin_memory,
         )
+        
 
         # Always use DFloat11ModelPatcher for DF11 models (required due to missing .weight attributes
 
