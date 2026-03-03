@@ -1,0 +1,37 @@
+[project]
+name = "dfloat11-extended"
+description = "Fork of the official DF11 ComfyUI custom node that supports a wider variety of model architectures, and provides fixes for compatibility with recent ComfyUI versions. Also, LoRAs are supported for select model architectures."
+version = "1.0.0"
+license = {file = "LICENSE"} 
+# classifiers = [
+#     # For OS-independent nodes (works on all operating systems)
+#     "Operating System :: OS Independent",
+#
+#     # OR for OS-specific nodes, specify the supported systems:
+#     "Operating System :: Microsoft :: Windows",  # Windows specific
+#     "Operating System :: POSIX :: Linux",  # Linux specific
+#     "Operating System :: MacOS",  # macOS specific
+#
+#     # GPU Accelerator support. Pick the ones that are supported by your extension.
+#     "Environment :: GPU :: NVIDIA CUDA",    # NVIDIA CUDA support
+#     "Environment :: GPU :: AMD ROCm",       # AMD ROCm support
+#     "Environment :: GPU :: Intel Arc",      # Intel Arc support
+#     "Environment :: NPU :: Huawei Ascend",  # Huawei Ascend support
+#     "Environment :: GPU :: Apple Metal",    # Apple Metal support
+# ]
+
+dependencies = ["dfloat11[cuda12]"]
+
+[project.urls]
+Repository = "https://github.com/mingyi456/ComfyUI-DFloat11-Extended"
+#  Used by Comfy Registry https://registry.comfy.org
+Documentation = "https://github.com/mingyi456/ComfyUI-DFloat11-Extended/wiki"
+"Bug Tracker" = "https://github.com/mingyi456/ComfyUI-DFloat11-Extended/issues"
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "ComfyUI-DFloat11-Extended"
+Icon = ""
+includes = [] 
+# "requires-comfyui" = ">=1.0.0"  # ComfyUI version compatibility
+
