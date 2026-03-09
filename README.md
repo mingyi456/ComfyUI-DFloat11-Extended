@@ -1,5 +1,6 @@
 # Extended ComfyUI Plugin for DFloat11
 
+### Update: ComfyUI's recent dynamic VRAM feature causes problems with DFloat11 loading, so you will need to use the `--disable-dynamic-vram` flag when launching ComfyUI, in order to use DFloat11 models. I will investigate this issue, and hopefully I will be able to come up with a fix soon.
 ### Update: Flux.2-klein is now supported, but there is currently an unexplainable bug causing outputs to be slightly different from BF16 output. I am currently looking into this issue, and in the meantime I have added a new decompressor node that fully decompresses the model weights, so it acts like a regular Load Diffusion Model node. 
 
 <b>Currently supported model architectures:
