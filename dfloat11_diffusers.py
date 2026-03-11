@@ -1,5 +1,5 @@
 import cupy as cp
-import pkg_resources
+from importlib.resources import files
 import re
 import math
 import uuid
@@ -29,7 +29,7 @@ from dfloat11.dfloat11_utils import get_codec, get_32bit_codec, get_luts, encode
 
 from .convert_fixed_tensors import convert_diffusers_to_comfyui_flux
 
-ptx_path = pkg_resources.resource_filename("dfloat11", "decode.ptx")
+ptx_path = str(files("dfloat11").joinpath("decode.ptx"))
 _decode = cp.RawModule(path=ptx_path).get_function('decode')
 
 
