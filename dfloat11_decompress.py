@@ -1,5 +1,5 @@
 import cupy as cp
-import pkg_resources
+from importlib.resources import files
 import math
 
 import torch
@@ -7,7 +7,7 @@ import torch
 from dfloat11.dfloat11 import TensorManager
 import gc
 
-ptx_path = pkg_resources.resource_filename("dfloat11", "decode.ptx")
+ptx_path = str(files("dfloat11").joinpath("decode.ptx"))
 _decode = cp.RawModule(path=ptx_path).get_function('decode')
 
 bytes_per_thread = 8
