@@ -11,6 +11,15 @@ from .dfloat11_diffusers import DFloat11FluxDiffusersModel
 from .convert_fixed_tensors import convert_diffusers_to_comfyui_flux
 from .pattern_dict import MODEL_TO_PATTERN_DICT
 
+def filter_df11_keys(state_dict):
+    return {key: tensor for key, tensor in state_dict.items() if not any((key.endswith("sign_mantissa"), key.endswith("encoded_exponent"), key.endswith("luts"), key.endswith("gaps"), key.endswith("output_positions"), key.endswith("split_positions")))}
+
+class disable_weight_init_df11(comfy.ops.disable_weight_init):
+    class Linear(comfy.ops.disable_weight_init.Linear):
+        def __init__(self, in_features, out_features, bias=True, device=None, dtype=None):
+            super(comfy.ops.disable_weight_init.Linear, self).__init__(in_features, out_features, bias, device, dtype)
+            return
+
 class DFloat11ModelLoaderAdvanced:
     """
     A custom node to load a DFloat11 diffusion model from the `diffusion_models` directory.
@@ -32,7 +41,7 @@ class DFloat11ModelLoaderAdvanced:
                 "cpu_offload": ("BOOLEAN", {"default": False, "tooltip": "Whether to offload to CPU RAM"}),
                 "cpu_offload_blocks": ("INT", {"default": 0, "min": 0, "max": 999, "step": 1, "tooltip": "If set to 0, all blocks will be offloaded to CPU RAM"}),
                 "pin_memory": ("BOOLEAN", {"default": True, "tooltip": "Whether to lock/pin the weights to CPU RAM. Enabling this option increases RAM usage (which might cause OOM), but should increase speed"}),
-                "custom_modelpatcher": ("BOOLEAN", {"default": True, "tooltip": "Whether to use the experimental custom ModelPatcher. Currently has no effect since disabling it will cause errors"}),
+                "dynamic_vram_compatibility": (["custom_ops", "load_state_dict"], {"default": "custom_ops", "tooltip": "Strategy for compatibility with `dynamic_vram`, if it is enabled. `custom_ops` is better since it causes a smaller spike in RAM usage"}),
             }
         }
 
@@ -40,7 +49,7 @@ class DFloat11ModelLoaderAdvanced:
     FUNCTION = "load_dfloat11_model_advanced"
     CATEGORY = "DFloat11"
 
-    def load_dfloat11_model_advanced(self, dfloat11_model_name, cpu_offload, cpu_offload_blocks, pin_memory, custom_modelpatcher):
+    def load_dfloat11_model_advanced(self, dfloat11_model_name, cpu_offload, cpu_offload_blocks, pin_memory, dynamic_vram_compatibility):
         if not cpu_offload:
             cpu_offload_blocks = 0
             pin_memory = True
@@ -82,10 +91,17 @@ class DFloat11ModelLoaderAdvanced:
         if df11_type == "FluxSchnell" and model_config.unet_config.get("yak_mlp", False) and model_config.unet_config.get("txt_norm", False):
             df11_type = "OvisImage"
         
+        if comfy.memory_management.aimdo_enabled and dynamic_vram_compatibility == "custom_ops":
+            model_config.custom_operations = disable_weight_init_df11
+        
         model_config.set_inference_dtype(torch.bfloat16, torch.bfloat16)
         model = model_config.get_model(state_dict, "")
-        model = model.to(offload_device)
         
+        if not comfy.memory_management.aimdo_enabled:
+            model = model.to(offload_device)
+        
+        if comfy.memory_management.aimdo_enabled and dynamic_vram_compatibility == "load_state_dict":
+            model.diffusion_model.load_state_dict(filter_df11_keys(state_dict), strict=False, assign=False)
 
         DFloat11Model.from_single_file(
             dfloat11_model_path,
@@ -122,7 +138,7 @@ class DFloat11ModelLoader(DFloat11ModelLoaderAdvanced):
     FUNCTION = "load_dfloat11_model"
     
     def load_dfloat11_model(self, dfloat11_model_name):
-        return self.load_dfloat11_model_advanced(dfloat11_model_name, cpu_offload = False, cpu_offload_blocks = 0, pin_memory = True, custom_modelpatcher = True)
+        return self.load_dfloat11_model_advanced(dfloat11_model_name, cpu_offload = False, cpu_offload_blocks = 0, pin_memory = True, dynamic_vram_compatibility = "custom_ops")
 
 
 class DFloat11Decompressor:
