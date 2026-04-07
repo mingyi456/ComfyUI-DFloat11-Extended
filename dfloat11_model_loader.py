@@ -66,11 +66,30 @@ class DFloat11ModelLoaderAdvanced:
         # TODO: Refactor the logic for detecting `df11_type` into an external function
         missing_keys = {}
         
-        if "double_blocks.0.img_mlp.gate_proj.bias" in state_dict and ("txt_norm.scale" in state_dict or "txt_norm.weight" in state_dict):
+        if "double_blocks.0.img_mlp.gate_proj.bias" in state_dict and ("txt_norm.scale" in state_dict or "txt_norm.weight" in state_dict): # for Flux.2
             missing_keys["double_blocks.0.img_mlp.gate_proj.weight"] = None
         
-        if "double_stream_modulation_img.lin.sign_mantissa" in state_dict and "double_stream_modulation_img.lin.weight" not in state_dict:
+        if "double_stream_modulation_img.lin.sign_mantissa" in state_dict and "double_stream_modulation_img.lin.weight" not in state_dict: # for Flux.2
             missing_keys["double_stream_modulation_img.lin.weight"] = None
+        
+        if "encoder.lyric_encoder.layers.0.input_layernorm.weight" in state_dict and "decoder.layers.0.sign_mantissa" in state_dict: # for Ace-Step-v1.5
+            if state_dict["decoder.layers.0.sign_mantissa"].numel() == 62914560: # The smaller version
+                missing_keys["decoder.layers.0.mlp.gate_proj.weight"] = torch.empty([6144, 2048], device="meta")
+                missing_keys["decoder.layers.0.self_attn.q_proj.weight"] = torch.empty([2048, 2048], device="meta")
+                
+                missing_keys["encoder.lyric_encoder.layers.0.self_attn.q_proj.weight"] = torch.empty([2048, 2048], device="meta")
+                missing_keys["encoder.lyric_encoder.layers.0.mlp.gate_proj.weight"] = torch.empty([6144, 2048], device="meta")
+                
+            elif state_dict["decoder.layers.0.sign_mantissa"].numel() == 127139840: # The XL version
+                missing_keys["decoder.layers.0.mlp.gate_proj.weight"] = torch.empty([9728, 2560], device="meta")
+                missing_keys["decoder.layers.0.self_attn.q_proj.weight"] = torch.empty([4096, 2560], device="meta")
+                
+                missing_keys["encoder.lyric_encoder.layers.0.self_attn.q_proj.weight"] = torch.empty([2048, 2048], device="meta")
+                missing_keys["encoder.lyric_encoder.layers.0.mlp.gate_proj.weight"] = torch.empty([6144, 2048], device="meta")
+            
+            else:
+                raise Exception(f"Detected Ace-Step-v1.5 model, but unsure of size {state_dict['decoder.layers.0.sign_mantissa'].numel()}")
+                
 
         model_config = comfy.sd.model_detection.model_config_from_unet(state_dict | missing_keys, "")
         
