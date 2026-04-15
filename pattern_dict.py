@@ -272,8 +272,27 @@ MODEL_TO_PATTERN_DICT = {
             "feed_forward.w2",
             "feed_forward.w3",
             "adaLN_modulation.0"
-        )
+        ),
     },
+    
+    "ErnieImage": {
+        r"time_embedding": (
+            "linear_1",
+            "linear_2",
+        ),
+        r"adaLN_modulation.1": [],
+        r"layers\.\d+": (
+            "self_attention.to_q",
+            "self_attention.to_k",
+            "self_attention.to_v",
+            "self_attention.to_out.0",
+            "mlp.gate_proj",
+            "mlp.up_proj",
+            "mlp.linear_fc2",
+        ),
+        r"final_norm.linear": [],
+    },
+
     "SDXL": {
         r"time_embed" : (
             "0",
