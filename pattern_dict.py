@@ -60,7 +60,7 @@ MODEL_TO_PATTERN_DICT = {
     },
     
     "OvisImage": {
-            r"double_blocks\.\d+": (
+        r"double_blocks\.\d+": (
             "img_mod.lin",
             "img_attn.qkv",
             "img_attn.proj",
@@ -274,6 +274,36 @@ MODEL_TO_PATTERN_DICT = {
             "adaLN_modulation.0"
         ),
     },
+    "ZImagePixelSpace": {
+        r"noise_refiner\.\d+": (
+            "attention.qkv",
+            "attention.out",
+            "feed_forward.w1",
+            "feed_forward.w2",
+            "feed_forward.w3",
+            "adaLN_modulation.0"
+        ),
+        r"context_refiner\.\d+": (
+            "attention.qkv",
+            "attention.out",
+            "feed_forward.w1",
+            "feed_forward.w2",
+            "feed_forward.w3",
+        ),
+        r"layers\.\d+": (
+            "attention.qkv",
+            "attention.out",
+            "feed_forward.w1",
+            "feed_forward.w2",
+            "feed_forward.w3",
+            "adaLN_modulation.0"
+        ),
+        r"dec_net\.res_blocks\.\d+": (
+            "mlp.0",
+            "mlp.2",
+            "adaLN_modulation.1"
+        ),
+    },
     
     "ErnieImage": {
         r"time_embedding": (
@@ -341,7 +371,6 @@ MODEL_TO_PATTERN_DICT = {
             "attn2.to_out.0",
         ),
         
-        
         r"input_blocks\.7\.0" : (
             "emb_layers.1",
         ),
@@ -376,7 +405,6 @@ MODEL_TO_PATTERN_DICT = {
             "attn2.to_out.0",
         ),
 
-
         r"middle_block\.0" : (
             "emb_layers.1",
         ),
@@ -395,7 +423,6 @@ MODEL_TO_PATTERN_DICT = {
         r"middle_block\.2" : (
             "emb_layers.1",
         ),
-
 
         r"output_blocks\.[01]\.0" : (
             "emb_layers.1",
