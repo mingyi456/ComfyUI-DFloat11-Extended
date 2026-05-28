@@ -322,7 +322,24 @@ MODEL_TO_PATTERN_DICT = {
         ),
         r"final_norm.linear": [],
     },
-
+    
+    "Lens":  {
+        r"txt_in": [],
+        r"transformer_blocks\.\d+": (
+            "attn.img_qkv",
+            "attn.txt_qkv",
+            "attn.to_out.0",
+            "img_mod.1",
+            "img_mlp.w1",
+            "img_mlp.w2",
+            "img_mlp.w3",
+            "txt_mod.1",
+            "txt_mlp.w1",
+            "txt_mlp.w2",
+            "txt_mlp.w3",
+        ),
+    },
+    
     "SDXL": {
         r"time_embed" : (
             "0",

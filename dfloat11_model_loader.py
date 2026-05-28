@@ -75,6 +75,9 @@ class DFloat11ModelLoaderAdvanced:
         if "adaLN_modulation.1.sign_mantissa" in state_dict and "time_embedding.sign_mantissa" in state_dict and state_dict["layers.0.sign_mantissa"].numel() == 218103808: # for ErnieImage
             missing_keys["layers.0.mlp.linear_fc2.weight"] = None
         
+        if "transformer_blocks.0.attn.norm_added_q.weight" in state_dict and state_dict["transformer_blocks.0.attn.norm_added_q.weight"].numel() == 64: # for Lens
+            missing_keys["transformer_blocks.0.img_mlp.w1.weight"] = None
+        
         if "encoder.lyric_encoder.layers.0.input_layernorm.weight" in state_dict and "decoder.layers.0.sign_mantissa" in state_dict: # for Ace-Step-v1.5
             if state_dict["decoder.layers.0.sign_mantissa"].numel() == 62914560: # The smaller version
                 missing_keys["decoder.layers.0.mlp.gate_proj.weight"] = torch.empty([6144, 2048], device="meta")
