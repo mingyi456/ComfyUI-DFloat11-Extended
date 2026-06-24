@@ -304,7 +304,53 @@ MODEL_TO_PATTERN_DICT = {
             "adaLN_modulation.1"
         ),
     },
-    
+
+
+    "Krea2": {
+        r"blocks\.\d+": (
+            "attn.wq",
+            "attn.wk",
+            "attn.wv",
+            "attn.gate",
+            "attn.wo",
+            "mlp.gate",
+            "mlp.up",
+            "mlp.down",
+        ),
+        r"tmlp": (
+            "0",
+            "2",
+        ),
+        r"txtfusion\.layerwise_blocks\.\d+": (
+            "attn.wq",
+            "attn.wk",
+            "attn.wv",
+            "attn.gate",
+            "attn.wo",
+            "mlp.gate",
+            "mlp.up",
+            "mlp.down",
+        ),
+        r"txtfusion\.refiner_blocks\.\d+": (
+            "attn.wq",
+            "attn.wk",
+            "attn.wv",
+            "attn.gate",
+            "attn.wo",
+            "mlp.gate",
+            "mlp.up",
+            "mlp.down",
+        ),
+        r"txtmlp": (
+            "1",
+            "3",
+        ),
+        r"tproj": (
+            "1",
+        ),
+    },
+
+
     "ErnieImage": {
         r"time_embedding": (
             "linear_1",
@@ -589,4 +635,3 @@ MODEL_TO_PATTERN_DICT = {
         ),
     },
 }
-

@@ -72,6 +72,10 @@ class DFloat11ModelLoaderAdvanced:
         if "double_stream_modulation_img.lin.sign_mantissa" in state_dict and "double_stream_modulation_img.lin.weight" not in state_dict: # for Flux.2
             missing_keys["double_stream_modulation_img.lin.weight"] = None
         
+        if "txtfusion.projector.weight" in state_dict: # For Krea 2
+            missing_keys["blocks.0.attn.wq.weight"] = torch.empty([6144, 6144], device="meta")
+            missing_keys["blocks.0.attn.wk.weight"] = torch.empty([1536, 6144], device="meta")
+            
         if "adaLN_modulation.1.sign_mantissa" in state_dict and "time_embedding.sign_mantissa" in state_dict and state_dict["layers.0.sign_mantissa"].numel() == 218103808: # for ErnieImage
             missing_keys["layers.0.mlp.linear_fc2.weight"] = None
         
