@@ -4463,7 +4463,7 @@ state_dict_mapping = {
     "ErnieImage": ernie_keys_dict,
     "ZImage": zimage_keys_dict,
     # TODO: Investigate possible bugs
-    # "Krea2": krea2_keys_dict,
+    "Krea2": krea2_keys_dict,
     "Flux2": flux2_keys_dict,
     "Anima": anima_keys_dict,
     "ACEStep15": ace_step_keys_dict,
