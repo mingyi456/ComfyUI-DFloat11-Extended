@@ -108,7 +108,7 @@ class DFloat11ModelPatcher(comfy.model_patcher.ModelPatcher):
     This class MUST be used for all DFloat11 models because the standard ModelPatcher
     will fail when trying to access .weight on compressed layers.
     """
-    def __init__(self, model, load_device, offload_device, size=0, weight_inplace_update=False):
+    def __init__(self, model, load_device, offload_device, size=0, weight_inplace_update=False, fast_disk=False):
         super().__init__(model, load_device, offload_device, size=size, weight_inplace_update=weight_inplace_update)
 
         self._patch_state_dict()
