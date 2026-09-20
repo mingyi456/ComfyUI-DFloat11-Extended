@@ -1,4 +1,4 @@
-from .dfloat11_model_loader import DFloat11ModelLoader, DFloat11ModelLoaderAdvanced, DFloat11DiffusersModelLoader, DFloat11ModelCompressor, DFloat11CheckpointCompressor, CheckpointLoaderWithDFloat11, DFloat11LoadingPatch, DFloat11Decompressor
+from .dfloat11_model_loader import DFloat11ModelLoader, DFloat11ModelLoaderAdvanced, DFloat11DiffusersModelLoader, DFloat11ModelCompressor, DFloat11CheckpointCompressor, CheckpointLoaderWithDFloat11, DFloat11LoadingPatch, DFloat11Decompressor, DFloat11SingleBatchPatch
 
 NODE_CLASS_MAPPINGS = {
     "DFloat11ModelLoader": DFloat11ModelLoader,
@@ -9,6 +9,7 @@ NODE_CLASS_MAPPINGS = {
     "CheckpointLoaderWithDFloat11": CheckpointLoaderWithDFloat11,
     "DFloat11LoadingPatch": DFloat11LoadingPatch,
     "DFloat11Decompressor": DFloat11Decompressor,
+    "DFloat11SingleBatchPatch": DFloat11SingleBatchPatch,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -18,7 +19,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "DFloat11ModelCompressor": "DFloat11 Model Compressor",
     "DFloat11CheckpointCompressor": "DFloat11 Checkpoint Compressor",
     "CheckpointLoaderWithDFloat11": "Load Checkpoint with DFloat11 Unet",
-    "DFloat11LoadingPatch" : "Patch DFloat11 Loading",
+    "DFloat11LoadingPatch": "Patch DFloat11 Loading",
+    "DFloat11SingleBatchPatch": "Patch DFloat11 Batching",
 }
 
 

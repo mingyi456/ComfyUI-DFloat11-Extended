@@ -208,13 +208,12 @@ class DFloat11Decompressor:
         return (model_patcher,)
 
 
-
 class DFloat11LoadingPatch:
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model_patcher": ("MODEL", {"tooltip": "The model to display information for"}),
+                "model_patcher": ("MODEL", {"tooltip": "The model to patch the loading mechanism"}),
                 "load_version": (["v1", "v1.5", "v2"],),
                 "memory_usage_factor_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step":0.01, "round": 0.01, "tooltip": "The multiplier to scale ComfyUI's memory usage estimation"}),
             }
@@ -233,6 +232,81 @@ class DFloat11LoadingPatch:
         new_model_patcher.model.model_config.memory_usage_factor *= memory_usage_factor_scale
         new_model_patcher.model.memory_usage_factor = new_model_patcher.model.model_config.memory_usage_factor
 
+        return (new_model_patcher,)
+
+
+
+class DFloat11SingleBatchPatch:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model_patcher": ("MODEL", {"tooltip": "The model to patch the batching mechanism"}),
+            }
+        }
+
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch_batches"
+    CATEGORY = "DFloat11"
+
+    def patch_batches(self, model_patcher):
+        new_model_patcher = model_patcher.clone()
+        
+        old_wrapper = model_patcher.model_options.get("model_function_wrapper", None)
+        
+        def unbatch_wrapper(apply_func: callable, args: dict, /):
+
+            input_batched = args.pop("input")
+            timestep_batched = args.pop("timestep")
+            c = args.pop("c")
+            
+            batch_size = timestep_batched.numel()
+            
+            inputs_split = torch.split(input_batched, 1)
+            timesteps_split = torch.split(timestep_batched, 1)
+            
+            c_split = [{"transformer_options": {}} for _ in range(batch_size)]
+            
+            c_crossattn_split = torch.split(c.pop("c_crossattn"), 1)
+            guidance_split = torch.split(c.pop("guidance"), 1)
+            
+            has_ref_latents = "ref_latents" in c.keys()
+
+            if has_ref_latents:
+                ref_latents_split = [torch.split(ref_latent, 1) for ref_latent in c.pop("ref_latents")]
+            
+            transformer_options = c.pop("transformer_options")
+            
+            cond_or_uncond_split = transformer_options.pop("cond_or_uncond")
+            uuids_split = transformer_options.pop("uuids")
+            
+            for i in range(batch_size):
+                c_split[i]["c_crossattn"] = c_crossattn_split[i]
+                c_split[i]["guidance"] = guidance_split[i]
+                
+                if has_ref_latents:
+                    c_split[i]["ref_latents"] = [ref_latent[i] for ref_latent in ref_latents_split]
+                
+                c_split[i]["transformer_options"]["cond_or_uncond"] = cond_or_uncond_split[i]
+                c_split[i]["transformer_options"]["uuids"] = uuids_split[i]
+                
+                # Copy leftover keys
+                c_split[i].update(c)
+                c_split[i]["transformer_options"].update(transformer_options)
+            
+            outputs_split = []
+            
+            if old_wrapper:
+                for inputs_single, timesteps_single, c_single in zip(inputs_split, timesteps_split, c_split):
+                    outputs_split.append(old_wrapper(apply_func, args))
+            else:
+                for inputs_single, timesteps_single, c_single in zip(inputs_split, timesteps_split, c_split):
+                    outputs_split.append(apply_func(inputs_single, timesteps_single, **c_single))
+                
+            output = torch.cat(outputs_split, dim=0)
+            return output
+        
+        new_model_patcher.set_model_unet_function_wrapper(unbatch_wrapper)
         return (new_model_patcher,)
 
 
