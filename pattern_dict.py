@@ -349,7 +349,19 @@ MODEL_TO_PATTERN_DICT = {
             "1",
         ),
     },
-
+    
+    "QwenImage21": {
+        r"modulation\.1": [],
+        
+        r"transformer_blocks\.\d+": (
+            "attn.to_q",
+            "attn.to_k",
+            "attn.to_v",
+            "attn.to_out.0",
+            "img_mlp.gate_up",
+            "img_mlp.out",
+        ),
+    },
 
     "ErnieImage": {
         r"time_embedding": (

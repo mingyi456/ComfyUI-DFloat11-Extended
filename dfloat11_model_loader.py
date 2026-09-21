@@ -82,6 +82,12 @@ class DFloat11ModelLoaderAdvanced:
         if "transformer_blocks.0.attn.norm_added_q.weight" in state_dict and state_dict["transformer_blocks.0.attn.norm_added_q.weight"].numel() == 64: # for Lens
             missing_keys["transformer_blocks.0.img_mlp.w1.weight"] = None
         
+        qwen_image21_keys = ['txt_in.text_norm.weight', 'modulation.1.sign_mantissa', 'transformer_blocks.0.attn.norm_q.weight', 'img_in.weight', 'proj_out.weight']
+        
+        if all(key in state_dict for key in qwen_image21_keys) and True: # For Qwen Image 2.1
+            missing_keys["modulation.1.weight"] = torch.empty([16384, 4096], device="meta")
+            missing_keys["transformer_blocks.0.img_mlp.gate_up.weight"] = torch.empty([24576, 4096], device="meta")
+        
         if "encoder.lyric_encoder.layers.0.input_layernorm.weight" in state_dict and "decoder.layers.0.sign_mantissa" in state_dict: # for Ace-Step-v1.5
             if state_dict["decoder.layers.0.sign_mantissa"].numel() == 62914560: # The smaller version
                 missing_keys["decoder.layers.0.mlp.gate_proj.weight"] = torch.empty([6144, 2048], device="meta")
