@@ -82,7 +82,7 @@ MODEL_TO_PATTERN_DICT = {
     },
     
     "Flux2": {
-        r"double_blocks\.\d+" : (
+        r"double_blocks\.\d+": (
             "img_attn.qkv",
             "img_attn.proj",
             "img_mlp.0",
@@ -92,18 +92,17 @@ MODEL_TO_PATTERN_DICT = {
             "txt_mlp.0",
             "txt_mlp.2",
         ),
-        r"single_blocks\.\d+" : (
+        r"single_blocks\.\d+": (
             "linear1",
             "linear2",
         ),
         
-        "double_stream_modulation_img\.lin" : [],
-        "double_stream_modulation_txt\.lin" : [],
-        "single_stream_modulation\.lin" : [],
+        "double_stream_modulation_img\.lin": [],
+        "double_stream_modulation_txt\.lin": [],
+        "single_stream_modulation\.lin": [],
     },
-
     "Flux2-alt": {
-        r"double_blocks\.\d+" : (
+        r"double_blocks\.\d+": (
             "img_attn.qkv",
             "img_attn.proj",
             "img_mlp.0",
@@ -113,9 +112,54 @@ MODEL_TO_PATTERN_DICT = {
             "txt_mlp.0",
             "txt_mlp.2",
         ),
-        r"single_blocks\.\d+" : (
+        r"single_blocks\.\d+": (
             "linear1",
             "linear2",
+        ),
+    },
+
+    "Flux3": {
+        r"txt_in": [],
+        
+        r"early_stream_modulations\.image\.lin": [],
+        r"early_stream_modulations\.image_cond\.lin": [],
+        r"early_stream_modulations\.txt\.lin": [],
+        
+        r"single_stream_modulations\.image\.lin": [],
+        r"single_stream_modulations\.image_cond\.lin": [],
+        r"single_stream_modulations\.txt\.lin": [],
+
+        r"content_mode_blocks\.image\.\d+": (
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "mlp_in",
+            "attn_out",
+            "mlp_out",
+        ),
+        r"content_mode_blocks\.image_cond\.\d+": (
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "mlp_in",
+            "attn_out",
+            "mlp_out",
+        ),
+        r"txt_mode_blocks\.\d+": (
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "mlp_in",
+            "attn_out",
+            "mlp_out",
+        ),
+        r"single_blocks\.\d+" : (
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "mlp_in",
+            "attn_out",
+            "mlp_out",
         ),
     },
 
@@ -163,7 +207,7 @@ MODEL_TO_PATTERN_DICT = {
         )
     }, 
     "CosmosT2IPredict2": {
-        "t_embedder\.1": (
+        r"t_embedder\.1": (
             "linear_1",
             "linear_2",
         ),
@@ -185,6 +229,22 @@ MODEL_TO_PATTERN_DICT = {
             "adaln_modulation_mlp.1",
             "adaln_modulation_mlp.2",
         )
+    },
+    "MOSSImage": {
+        r"text_embedder\.blocks\.\d+": (
+            "qkv",
+            "proj",
+            "ffn_gate",
+            "ffn_up",
+            "ffn_down"        
+        ),
+        r"shared_block_modulation": [],
+        r"layers\.\d+": (
+            "proj.qkv",
+            "proj.o",
+            "proj.ffn_up_gate",
+            "proj.ffn_down"        
+        )    
     },
     "Anima": {
         r"t_embedder\.1" : (

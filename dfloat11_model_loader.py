@@ -72,6 +72,11 @@ class DFloat11ModelLoaderAdvanced:
         if "double_stream_modulation_img.lin.sign_mantissa" in state_dict and "double_stream_modulation_img.lin.weight" not in state_dict: # for Flux.2
             missing_keys["double_stream_modulation_img.lin.weight"] = None
         
+        if "content_mode_blocks.image.0.sign_mantissa" in state_dict and state_dict["content_mode_blocks.image.0.sign_mantissa"].numel() == 122683392 and "single_stream_modulations.txt.lin.sign_mantissa" in state_dict: # for Flux.3
+            missing_keys["content_mode_blocks.image.0.attn_out.weight"] = torch.empty([3072, 3072], device="meta")
+            missing_keys["single_stream_modulations.txt.lin.weight"] = None
+        
+        
         if "txtfusion.projector.weight" in state_dict: # For Krea 2
             missing_keys["blocks.0.attn.wq.weight"] = torch.empty([6144, 6144], device="meta")
             missing_keys["blocks.0.attn.wk.weight"] = torch.empty([1536, 6144], device="meta")
@@ -87,6 +92,11 @@ class DFloat11ModelLoaderAdvanced:
         if all(key in state_dict for key in qwen_image21_keys) and True: # For Qwen Image 2.1
             missing_keys["modulation.1.weight"] = torch.empty([16384, 4096], device="meta")
             missing_keys["transformer_blocks.0.img_mlp.gate_up.weight"] = torch.empty([24576, 4096], device="meta")
+        
+        if "shared_block_modulation.sign_mantissa" in state_dict and state_dict["shared_block_modulation.sign_mantissa"].numel() == 56623104 and state_dict["layers.0.sign_mantissa"].numel() == 113246208: # for MossImage
+            missing_keys["shared_block_modulation.weight"] = torch.empty([18432, 3072], device="meta")
+            missing_keys["layers.0.proj.ffn_up_gate.weight"] = torch.empty([16384, 3072], device="meta")
+            missing_keys["layers.0.proj.qkv.weight"] = None
         
         if "encoder.lyric_encoder.layers.0.input_layernorm.weight" in state_dict and "decoder.layers.0.sign_mantissa" in state_dict: # for Ace-Step-v1.5
             if state_dict["decoder.layers.0.sign_mantissa"].numel() == 62914560: # The smaller version
