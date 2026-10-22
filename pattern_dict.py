@@ -458,6 +458,43 @@ MODEL_TO_PATTERN_DICT = {
         ),
     },
     
+    "Fibo2": {
+        r"noise_refiner\.\d+": (
+            "attention.qkv",
+            "attention.out",
+            "feed_forward.w13",
+            "feed_forward.w2",
+            "adaLN_modulation.0"
+        ),
+        r"perceiver\.layers\.\d+": (
+            "cross_attention.to_q",
+            "cross_attention.to_kv",
+            "cross_attention.to_out",
+            "self_attention.to_q",
+            "self_attention.to_kv",
+            "self_attention.to_out",
+            "ffn.w13",
+            "ffn.w2"
+        ),
+        r"layers\.(?!6|14|22|30|38)\d+": (
+            "attention.qkv",
+            "attention.out",
+            "feed_forward.w13",
+            "feed_forward.w2",
+            "adaLN_modulation.0"
+        ),
+        r"layers\.(?:6|14|22|30|38)": (
+            "attention.qkv",
+            "attention.out",
+            "feed_forward.w13",
+            "feed_forward.w2",
+            "adaLN_modulation.0",
+            "cross_attention.to_q",
+            "cross_attention.to_kv",
+            "cross_attention.to_out"
+        )    
+    },
+
     "SDXL": {
         r"time_embed" : (
             "0",

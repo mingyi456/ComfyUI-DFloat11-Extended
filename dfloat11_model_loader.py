@@ -97,6 +97,10 @@ class DFloat11ModelLoaderAdvanced:
             missing_keys["shared_block_modulation.weight"] = torch.empty([18432, 3072], device="meta")
             missing_keys["layers.0.proj.ffn_up_gate.weight"] = torch.empty([16384, 3072], device="meta")
             missing_keys["layers.0.proj.qkv.weight"] = None
+            
+        if "perceiver.latent_queries" in state_dict and "layers.0.sign_mantissa" in state_dict and state_dict["layers.0.sign_mantissa"].numel() == 159645696: # for Fibo 2.0
+            missing_keys["layers.0.feed_forward.w13.weight"] = torch.empty([19456, 3584], device="meta")
+            missing_keys["layers.0.attention.qkv.weight"] = None
         
         if "encoder.lyric_encoder.layers.0.input_layernorm.weight" in state_dict and "decoder.layers.0.sign_mantissa" in state_dict: # for Ace-Step-v1.5
             if state_dict["decoder.layers.0.sign_mantissa"].numel() == 62914560: # The smaller version
